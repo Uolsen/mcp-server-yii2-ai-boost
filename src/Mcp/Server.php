@@ -17,6 +17,11 @@ use yii\base\Exception;
 class Server extends Component
 {
     /**
+     * Package version - update this with each release
+     */
+    public const VERSION = '1.1.1';
+
+    /**
      * @var string Base path to the Yii2 application
      */
     public $basePath;
@@ -316,7 +321,7 @@ class Server extends Component
             ],
             'serverInfo' => [
                 'name' => 'Yii2 AI Boost',
-                'version' => '1.0.0',
+                'version' => self::VERSION,
             ],
         ];
     }

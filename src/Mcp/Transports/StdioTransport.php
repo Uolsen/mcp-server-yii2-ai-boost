@@ -118,6 +118,19 @@ final class StdioTransport
         $this->log("Starting MCP server listener");
 
         while (true) {
+            // Use stream_select to wait for data before reading.
+            // This is required because fgets() may not properly block on tcp_socket
+            // stream types (which occur when PHP is spawned from Node.js/Claude Code).
+            $read = [$this->stdin];
+            $write = null;
+            $except = null;
+            $ready = @stream_select($read, $write, $except, null);  // null = wait forever
+
+            if ($ready === false) {
+                $this->log("stream_select failed - exiting", "ERROR");
+                break;
+            }
+
             // Read a line from STDIN
             $line = fgets($this->stdin);
 
@@ -129,16 +142,8 @@ final class StdioTransport
                     break;
                 }
 
-                // Check if this was a timeout (shouldn't happen with timeout=0, but handle it)
-                $meta = stream_get_meta_data($this->stdin);
-                if ($meta['timed_out']) {
-                    $this->log("Stream timeout - continuing to wait", "DEBUG");
-                    continue;
-                }
-
                 // Actual stream error
                 $this->log("Failed to read from stdin", "ERROR");
-                fwrite(STDERR, "[MCP ERROR] Failed to read from stdin\n");
                 break;
             }
 

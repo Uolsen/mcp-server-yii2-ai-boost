@@ -155,32 +155,6 @@ class InstallController extends Controller
             '.mcp.json'
         );
 
-        // Generate boost.json
-        $boostConfig = [
-            'version' => '1.0.0',
-            'yii2_version' => $envInfo['yii_version'],
-            'php_version' => $envInfo['php_version'],
-            'environment' => $envInfo['yii_env'],
-            'debug' => $envInfo['yii_debug'],
-            'tools' => [
-                'application_info',
-                'database_schema',
-                'config_access',
-                'route_inspector',
-                'component_inspector',
-            ],
-            'guidelines' => [
-                'core' => '2.0.45',
-            ],
-        ];
-
-        $boostConfigJson = json_encode($boostConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
-        $this->updateFileWithConfirmation(
-            $basePath . '/boost.json',
-            $boostConfigJson,
-            'boost.json'
-        );
-
         // Add .mcp.json to .gitignore
         $this->addToGitignore($basePath, '.mcp.json');
     }
@@ -317,7 +291,6 @@ class InstallController extends Controller
 
         $this->stdout("Configuration files created:\n", 36);
         $this->stdout("  • .mcp.json (IDE configuration)\n", 0);
-        $this->stdout("  • boost.json (package configuration)\n", 0);
         $this->stdout("  • .ai/guidelines/ (framework and ecosystem guidelines)\n\n", 0);
 
         $this->stdout("MCP Server command:\n", 36);

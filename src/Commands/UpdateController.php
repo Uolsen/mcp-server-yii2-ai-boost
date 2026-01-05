@@ -87,7 +87,7 @@ class UpdateController extends Controller
         $basePath = Yii::getAlias('@app');
 
         $files = [
-            'boost.json',
+            '.mcp.json',
             'CLAUDE.md',
             '.ai/guidelines',
         ];

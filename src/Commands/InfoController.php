@@ -50,17 +50,10 @@ class InfoController extends Controller
         $this->stdout("Package Information\n", 33);
         $this->stdout("─────────────────────────────────────────\n", 33);
 
-        $basePath = Yii::getAlias('@app');
-        $boostConfigFile = $basePath . '/boost.json';
-
-        if (file_exists($boostConfigFile)) {
-            $config = json_decode(file_get_contents($boostConfigFile), true);
-            $this->stdout("  Version: " . ($config['version'] ?? 'unknown') . "\n", 32);
-            $this->stdout("  Yii2 Version: " . ($config['yii2_version'] ?? 'unknown') . "\n", 32);
-            $this->stdout("  Environment: " . ($config['environment'] ?? 'unknown') . "\n", 32);
-        } else {
-            $this->stdout("  ✗ boost.json not found (not installed?)\n", 31);
-        }
+        $this->stdout("  Version: " . \codechap\yii2boost\Mcp\Server::VERSION . "\n", 32);
+        $this->stdout("  Yii2 Version: " . Yii::getVersion() . "\n", 32);
+        $this->stdout("  PHP Version: " . phpversion() . "\n", 32);
+        $this->stdout("  Environment: " . YII_ENV . "\n", 32);
 
         $this->stdout("\n", 0);
     }
@@ -77,7 +70,6 @@ class InfoController extends Controller
 
         $files = [
             '.mcp.json' => 'MCP server configuration',
-            'boost.json' => 'Package configuration',
             'CLAUDE.md' => 'Application guidelines',
             '.ai/guidelines' => 'Guidelines directory',
         ];

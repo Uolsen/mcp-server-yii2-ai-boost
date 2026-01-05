@@ -19,7 +19,7 @@ class Server extends Component
     /**
      * Package version - update this with each release
      */
-    public const VERSION = '1.1.1';
+    public const VERSION = '1.1.2';
 
     /**
      * @var string Base path to the Yii2 application
@@ -486,16 +486,7 @@ class Server extends Component
     private function registerResources(): void
     {
         $this->log("Registering MCP resources");
-
-        try {
-            $this->resources['config://boost'] = new Resources\BoostConfigResource([
-                'basePath' => $this->basePath,
-            ]);
-            $this->log("  ✓ Registered resource: config://boost");
-        } catch (\Exception $e) {
-            $this->log("  ✗ Failed to register config resource: " . $e->getMessage(), "ERROR");
-        }
-
+        // No resources currently registered
         $this->log("Resource registration complete. Total: " . count($this->resources) . " resources");
     }
 

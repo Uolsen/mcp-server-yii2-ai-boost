@@ -45,8 +45,20 @@ final class StdioTransport
     public function __construct(?string $basePath = null)
     {
         $this->basePath = $basePath;
-        $this->stdin = fopen('php://stdin', 'r');
-        $this->stdout = fopen('php://stdout', 'w');
+        $stdin = fopen('php://stdin', 'r');
+        $stdout = fopen('php://stdout', 'w');
+
+        if ($stdin === false || $stdout === false) {
+            throw new \RuntimeException('Failed to open STDIO streams');
+        }
+
+        $this->stdin = $stdin;
+        $this->stdout = $stdout;
+
+        // Configure stdin for blocking reads with no timeout
+        // This prevents fgets() from returning false due to socket timeout
+        stream_set_blocking($this->stdin, true);
+        stream_set_timeout($this->stdin, 0);  // 0 = infinite timeout
 
         // Initialize log file
         $this->logFile = $this->getLogFile();
@@ -115,12 +127,19 @@ final class StdioTransport
                     // Normal EOF - client disconnected
                     $this->log("Client disconnected (EOF received)", "INFO");
                     break;
-                } else {
-                    // Stream error
-                    $this->log("Failed to read from stdin", "ERROR");
-                    fwrite(STDERR, "[MCP ERROR] Failed to read from stdin\n");
-                    break;
                 }
+
+                // Check if this was a timeout (shouldn't happen with timeout=0, but handle it)
+                $meta = stream_get_meta_data($this->stdin);
+                if ($meta['timed_out']) {
+                    $this->log("Stream timeout - continuing to wait", "DEBUG");
+                    continue;
+                }
+
+                // Actual stream error
+                $this->log("Failed to read from stdin", "ERROR");
+                fwrite(STDERR, "[MCP ERROR] Failed to read from stdin\n");
+                break;
             }
 
             // Skip empty lines

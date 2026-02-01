@@ -36,7 +36,8 @@
     },
     "autoload-dev": {
         "psr-4": {
-            "codechap\\yii2boost\\tests\\": "tests/"
+            "codechap\\yii2boost\\tests\\": "tests/",
+            "app\\models\\": "tests/fixtures/app/models/"
         }
     },
     "extra": {

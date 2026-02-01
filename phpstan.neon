@@ -18,6 +18,9 @@ parameters:
         - '#Constant (YII_ENV|YII_DEBUG) not found#'
         - '#unknown class.*TransportInterface#'
         
+        # Optional Yii2 extensions that may not be installed
+        - '#Class yii\\debug\\LogTarget not found#'
+        
         # Resource types (fopen returns resource|false)
         - '#does not accept resource\|false#'
         
@@ -35,10 +38,12 @@ parameters:
         # Return type issues with json_decode
         - '#should return string but returns string\|false#'
         
-        # Dynamic object access
+        # Dynamic object access (Yii2 components, ActiveRecord, ActiveQuery)
         - '#Call to an undefined method object::#'
+        - '#Call to an undefined static method object::#'
         - '#(Cannot call method|Call to method).*on (an unknown class|class-string\|object)#'
         - '#Access to an undefined property object::#'
+        - '#Access to an undefined property yii\\db\\ActiveQueryInterface::#'
         
         # Negated boolean from PHPDoc
         - '#Negated boolean expression is always false#'

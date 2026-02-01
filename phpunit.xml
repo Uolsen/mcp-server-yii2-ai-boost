@@ -10,8 +10,12 @@
          failOnWarning="true"
          verbose="true">
     <testsuites>
-        <testsuite name="MCP Server Tests">
+        <testsuite name="Unit Tests">
             <directory>tests/</directory>
+            <exclude>tests/Mcp/Tools/</exclude>
+        </testsuite>
+        <testsuite name="Tool Tests">
+            <directory>tests/Mcp/Tools/</directory>
         </testsuite>
     </testsuites>
 

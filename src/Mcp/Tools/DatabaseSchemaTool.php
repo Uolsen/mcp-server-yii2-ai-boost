@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace codechap\yii2boost\Mcp\Tools;
 
 use Yii;
-use yii\db\TableSchema;
 use codechap\yii2boost\Mcp\Tools\Base\BaseTool;
 
 /**
@@ -205,104 +204,6 @@ final class DatabaseSchemaTool extends BaseTool
                 'table' => $table,
                 'error' => $e->getMessage(),
             ];
-        }
-    }
-
-    /**
-     * Discover Active Record models in models directory
-     *
-     * @return array
-     */
-    private function getActiveRecordModels(): array
-    {
-        $modelsPath = Yii::getAlias('@app/models');
-        if (!is_dir($modelsPath)) {
-            return [];
-        }
-
-        $models = [];
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($modelsPath, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::SELF_FIRST
-        );
-
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $className = $this->getClassNameFromFile($file->getPathname());
-                if ($className && $this->isActiveRecordModel($className)) {
-                    $models[] = $className;
-                }
-            }
-        }
-
-        return $models;
-    }
-
-    /**
-     * Extract class name from PHP file
-     *
-     * @param string $file File path
-     * @return string|null
-     */
-    private function getClassNameFromFile(string $file): ?string
-    {
-        $namespace = '';
-        $className = '';
-
-        $tokens = token_get_all(file_get_contents($file));
-
-        for ($i = 0; $i < count($tokens); $i++) {
-            if ($tokens[$i][0] === T_NAMESPACE) {
-                for ($j = $i + 1; $j < count($tokens); $j++) {
-                    if ($tokens[$j][0] === T_STRING) {
-                        $namespace .= $tokens[$j][1];
-                    } elseif ($tokens[$j][0] === T_NS_SEPARATOR) {
-                        $namespace .= '\\';
-                    } elseif ($tokens[$j][0] === ';') {
-                        break;
-                    }
-                }
-            }
-
-            if ($tokens[$i][0] === T_CLASS) {
-                for ($j = $i + 1; $j < count($tokens); $j++) {
-                    if ($tokens[$j][0] === T_STRING) {
-                        $className = $tokens[$j][1];
-                        break;
-                    }
-                }
-            }
-        }
-
-        return $namespace && $className ? $namespace . '\\' . $className : null;
-    }
-
-    /**
-     * Check if a class is an Active Record model
-     *
-     * @param string $className Class name
-     * @return bool
-     */
-    private function isActiveRecordModel(string $className): bool
-    {
-        try {
-            if (!class_exists($className)) {
-                return false;
-            }
-
-            $reflection = new \ReflectionClass($className);
-            $parent = $reflection->getParentClass();
-
-            while ($parent) {
-                if ($parent->getName() === 'yii\db\ActiveRecord') {
-                    return true;
-                }
-                $parent = $parent->getParentClass();
-            }
-
-            return false;
-        } catch (\Exception $e) {
-            return false;
         }
     }
 }

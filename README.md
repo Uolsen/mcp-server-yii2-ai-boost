@@ -241,7 +241,7 @@ Search the local Yii2 AI Guidelines database:
 - Filter by category (e.g., 'database', 'security', 'views')
 - Returns full Markdown content of the most relevant guides
 
-### 9. `model_inspector` - Model Inspector
+### 9. `model_inspector` - Model Inspector (beta release)
 Inspect Active Record models at runtime:
 - Attributes with database types, labels, and hints
 - Relations (hasOne/hasMany) with link details and junction tables
@@ -250,7 +250,7 @@ Inspect Active Record models at runtime:
 - Fields and extra fields for API serialization
 - Automatic model discovery from `@app/models`
 
-### 10. `validation_rules` - Validation Rules
+### 10. `validation_rules` - Validation Rules (beta release)
 Inspect model validation rules and constraints:
 - All validation rules with parameters and scenario filters
 - Built-in vs custom validator classification

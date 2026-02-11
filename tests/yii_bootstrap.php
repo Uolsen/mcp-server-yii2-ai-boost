@@ -26,6 +26,7 @@ Yii::setAlias('@app', __DIR__ . '/fixtures/app');
 new \yii\console\Application([
     'id' => 'test-app',
     'basePath' => __DIR__ . '/fixtures/app',
+    'controllerNamespace' => 'app\\commands',
     'runtimePath' => sys_get_temp_dir() . '/yii2-ai-boost-test/runtime',
     'components' => [
         'db' => [

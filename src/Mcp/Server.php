@@ -19,7 +19,7 @@ class Server extends Component
     /**
      * Package version - update this with each release
      */
-    public const VERSION = '1.2.0-beta.1';
+    public const VERSION = '1.2.1-beta.1';
 
     /**
      * @var string Base path to the Yii2 application
@@ -378,6 +378,7 @@ class Server extends Component
             Tools\SearchGuidelinesTool::class,
             Tools\ModelInspectorTool::class,
             Tools\ValidationRulesTool::class,
+            Tools\ConsoleCommandInspectorTool::class,
         ];
 
         foreach ($toolClasses as $class) {

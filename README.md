@@ -26,7 +26,7 @@ For experienced developers:
 composer require codechap/yii2-ai-boost:^1.1 --dev
 
 # Or install beta (includes model_inspector + validation_rules tools)
-composer require codechap/yii2-ai-boost:1.2.0-beta.1 --dev
+composer require codechap/yii2-ai-boost:1.2.1-beta.1 --dev
 
 # 2. Run installation
 php yii boost/install
@@ -50,7 +50,7 @@ cd /path/to/yii2/application
 composer require codechap/yii2-ai-boost:^1.1 --dev
 
 # Beta release (10 tools - includes model inspector + validation rules)
-composer require codechap/yii2-ai-boost:1.2.0-beta.1 --dev
+composer require codechap/yii2-ai-boost:1.2.1-beta.1 --dev
 ```
 
 ### **Step 2**: Run Installation Wizard

@@ -379,6 +379,7 @@ class Server extends Component
             Tools\ModelInspectorTool::class,
             Tools\ValidationRulesTool::class,
             Tools\ConsoleCommandInspectorTool::class,
+            Tools\MigrationInspectorTool::class,
         ];
 
         foreach ($toolClasses as $class) {

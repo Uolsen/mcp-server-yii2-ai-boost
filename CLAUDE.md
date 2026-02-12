@@ -306,12 +306,10 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"my_tool","
 - `widget_inspector` - Widget discovery, properties, methods, events, hierarchy (complete)
 - `performance_profiler` - EXPLAIN plans, index analysis, missing index detection (complete)
 
-**Phase 4 Tools** (future):
-- `behavior_inspector` - Behavior analysis
-- `event_inspector` - Application events
-- `cache_inspector` - Cache components and metrics
-- `environment_analyzer` - PHP configuration, extensions
-- `semantic_search` - Enhanced guidelines search
+**Phase 4 Tools** (planned):
+- `tinker` - Execute arbitrary PHP code in Yii2 application context
+- `env_inspector` - Environment variables, PHP extensions, system configuration
+- `semantic_search` - Embeddings-based guidelines search with semantic matching
 
 **Transport Expansion** (would require transport abstraction layer):
 - `HttpTransport` - For non-IDE MCP clients

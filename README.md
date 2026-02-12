@@ -334,11 +334,9 @@ The Log Inspector features a **multi-reader architecture** supporting three log 
 | **3** | **migration_inspector** | ✓ Complete | Migration status, history, pending, source viewing |
 | **3** | **widget_inspector** | ✓ Complete | Available widgets, properties, methods, events, hierarchy |
 | **3** | **performance_profiler** | ✓ Complete | EXPLAIN plans, index analysis, missing index detection |
-| 4 | behavior_inspector | 🔲 Future | Attached behaviors, methods, event handlers |
-| 4 | event_inspector | 🔲 Future | Application events, listeners, handlers |
-| 4 | cache_inspector | 🔲 Future | Cache components, performance metrics |
-| 4 | environment_analyzer | 🔲 Future | PHP configuration, extensions, system info |
-| 4 | semantic_search | 🔲 Future | Enhanced guidelines search with semantic matching |
+| 4 | tinker | 🔲 Planned | Execute arbitrary PHP code in Yii2 application context |
+| 4 | env_inspector | 🔲 Planned | Environment variables, PHP extensions, system configuration |
+| 4 | semantic_search | 🔲 Planned | Embeddings-based guidelines search with semantic matching |
 
 ---
 
@@ -477,7 +475,7 @@ _This section will be expanded as common questions arise. For now, please reach 
 | **1** | Core MVP | ✓ Complete | 8 tools + guidelines + installer   |
 | **2** | Model & Command Introspection | ✓ Complete | +3 tools (model inspector, validation rules, console commands) |
 | **3** | Extended Tools | ✓ Complete | +3 tools (migration inspector, widget inspector, performance profiler) |
-| **4** | Advanced Features | Planned | Behavior/event/cache inspection, semantic search |
+| **4** | Advanced Features | Planned | Tinker, env inspector, semantic search |
 
 Track progress and contribute at [GitHub](https://github.com/codechap/yii2-ai-boost).
 

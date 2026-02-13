@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Yii2 AI Boost** is a Model Context Protocol (MCP) server that integrates with Yii2 applications to provide AI assistants with tools for framework introspection, database inspection, and application guidelines. It implements MCP v2025-11-25 with JSON-RPC 2.0 over STDIO transport.
 
 The package is installable as a Composer dependency and provides:
-- **16 Tools** for introspection (application info, database schema, database query, config, routes, components, logs, guidelines search, model inspector, validation rules, console command inspector, migration inspector, widget inspector, performance profiler, tinker, env inspector)
+- **16 Tools** for introspection (application info, database schema, database query, config, routes, components, logs, semantic search, model inspector, validation rules, console command inspector, migration inspector, widget inspector, performance profiler, tinker, env inspector)
 - **Installation Wizard** for IDE integration (Claude Code, VS Code, Cursor, PhpStorm)
 - **Comprehensive Logging** across multiple levels (startup, requests, errors, transport)
 
@@ -78,7 +78,14 @@ Yii2 Application Integration
    - All extend `BaseTool` for consistency
    - Automatic sanitization of sensitive data
    - Support JSON Schema input validation
-   - Current tools: ApplicationInfo, DatabaseSchema, DatabaseQuery, ConfigAccess, RouteInspector, ComponentInspector, LogInspector, SearchGuidelines, ModelInspector, ValidationRules, ConsoleCommandInspector, MigrationInspector, WidgetInspector, PerformanceProfiler, Tinker, EnvInspector
+   - Current tools: ApplicationInfo, DatabaseSchema, DatabaseQuery, ConfigAccess, RouteInspector, ComponentInspector, LogInspector, SemanticSearch, ModelInspector, ValidationRules, ConsoleCommandInspector, MigrationInspector, WidgetInspector, PerformanceProfiler, Tinker, EnvInspector
+
+5. **Search Layer** (`src/Mcp/Search/`)
+   - FTS5-powered search using separate SQLite database
+   - `MarkdownSectionParser` - Splits markdown into H2 sections
+   - `SearchIndexManager` - FTS5 index management (raw PDO, not Yii2 DB)
+   - `GitHubGuideDownloader` - Fetches Yii2 guide from GitHub, caches locally
+   - Index location: `@runtime/boost/search.db`
 
 4. **Transport Layer** (`src/Mcp/Transports/StdioTransport.php`)
    - STDIO communication (reads STDIN, writes STDOUT)
@@ -151,6 +158,10 @@ Yii2 Application Integration
 - JSON-RPC protocol compliance (`JsonRpcProtocolTest.php`)
 - Server request/response structure (`ServerTest.php`)
 - Transport layer handling (`StdioTransportTest.php`)
+- Markdown section parsing (`Mcp/Search/MarkdownSectionParserTest.php`)
+- FTS5 search index management (`Mcp/Search/SearchIndexManagerTest.php`)
+- GitHub guide downloading (`Mcp/Search/GitHubGuideDownloaderTest.php`)
+- Semantic Search tool execution (`Mcp/Tools/SemanticSearchToolTest.php`)
 - Model Inspector tool execution (`Mcp/Tools/ModelInspectorToolTest.php`)
 - Validation Rules tool execution (`Mcp/Tools/ValidationRulesToolTest.php`)
 - Migration Inspector tool execution (`Mcp/Tools/MigrationInspectorToolTest.php`)
@@ -164,6 +175,7 @@ Yii2 Application Integration
 - `tests/fixtures/SchemaSetupTrait.php` - Creates/drops test tables (user, post, category)
 - `tests/fixtures/app/models/` - Fixture ActiveRecord models (User, Post, Category)
 - `tests/fixtures/app/widgets/` - Fixture Widget classes (TestWidget)
+- `tests/fixtures/github-api-response.json` - Mock GitHub API response for downloader tests
 - `tests/Mcp/Tools/ToolTestCase.php` - Base test case with schema setup/teardown
 
 **Limitations**: Full integration testing requires running MCP server with real Yii2 app. Unit tests cannot fully test:
@@ -260,6 +272,9 @@ All logging goes to STDERR immediately and to files asynchronously. This ensures
 - **`src/Bootstrap.php`** - Yii2 integration entry point
 - **`src/Commands/McpController.php`** - MCP server starter with logging setup
 - **`src/Commands/InstallController.php`** - Installation wizard creating config files
+- **`src/Mcp/Search/MarkdownSectionParser.php`** - Markdown to section splitter
+- **`src/Mcp/Search/SearchIndexManager.php`** - FTS5 index (raw PDO to SQLite)
+- **`src/Mcp/Search/GitHubGuideDownloader.php`** - Yii2 guide fetcher/cache
 - **`tests/JsonRpcProtocolTest.php`** - Protocol compliance tests
 - **`phpstan.neon`** - Static analysis config (level 8 via composer script)
 - **`phpunit.xml`** - Test suite config with coverage reporting
@@ -312,10 +327,12 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"my_tool","
 - `tinker` - Execute arbitrary PHP code in Yii2 application context
 - `env_inspector` - Environment variables, PHP extensions, system configuration
 
-**Phase 5 — Semantic Search** (planned):
-- SQLite FTS5 search index over Yii2 guide + local guidelines
-- GitHub content pipeline: fetch Yii2 definitive guide at install/update
-- BM25-ranked search replacing current grep-based `search_guidelines`
+**Phase 5 — Semantic Search** (complete):
+- `semantic_search` - FTS5-powered search replacing grep-based `search_guidelines`
+- `MarkdownSectionParser` - Section-level indexing (H2 boundaries)
+- `SearchIndexManager` - SQLite FTS5 with BM25 ranking
+- `GitHubGuideDownloader` - Yii2 definitive guide from GitHub, cached locally
+- Index: bundled guidelines (~60 sections) + Yii2 guide (~500+ sections)
 
 **Transport Expansion** (would require transport abstraction layer):
 - `HttpTransport` - For non-IDE MCP clients

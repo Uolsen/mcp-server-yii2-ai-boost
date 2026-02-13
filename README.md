@@ -1,6 +1,6 @@
 # Yii2 AI Boost - MCP Server for Yii2 Applications
 
-![Version](https://img.shields.io/badge/version-1.2.5--beta.1-blue)
+![Version](https://img.shields.io/badge/version-1.3.0--beta.1-blue)
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
 ![Yii2](https://img.shields.io/badge/Yii2-2.0.45-orange)
 
@@ -10,8 +10,8 @@ Yii2 AI Boost is a Model Context Protocol (MCP) server that provides AI assistan
 
 ## Features
 
-- **16 MCP Tools** - Database inspection and queries, config access, route analysis, component introspection, model and validation inspection, console command discovery, migration inspection, widget inspection, performance profiling, PHP tinker, environment inspection, logging, and guideline search
-- **On-Demand Guidelines** - AI searches 36KB of Yii2 best practices only when needed (zero context cost until requested)
+- **16 MCP Tools** - Database inspection and queries, config access, route analysis, component introspection, model and validation inspection, console command discovery, migration inspection, widget inspection, performance profiling, PHP tinker, environment inspection, logging, and FTS5-powered semantic search
+- **Semantic Search** - BM25-ranked full-text search over bundled guidelines + Yii2 definitive guide (section-level results, not full files)
 - **Framework Guidelines** - Comprehensive Yii2 patterns covering controllers, models, migrations, caching, auth, and more
 - **IDE Integration** - Works with Claude Code, Cursor, Zed, and other MCP-compatible editors
 
@@ -25,8 +25,8 @@ For experienced developers:
 # 1. Install stable release
 composer require codechap/yii2-ai-boost:^1.1 --dev
 
-# Or install beta (includes model_inspector, validation_rules, console_command_inspector, migration_inspector, widget_inspector, performance_profiler, tinker, env_inspector)
-composer require codechap/yii2-ai-boost:1.2.5-beta.1 --dev
+# Or install beta (includes semantic_search, model_inspector, validation_rules, console_command_inspector, migration_inspector, widget_inspector, performance_profiler, tinker, env_inspector)
+composer require codechap/yii2-ai-boost:1.3.0-beta.1 --dev
 
 # 2. Run installation
 php yii boost/install
@@ -49,8 +49,8 @@ cd /path/to/yii2/application
 # Stable release (8 core tools)
 composer require codechap/yii2-ai-boost:^1.1 --dev
 
-# Beta release (16 tools - includes model inspector, validation rules, console commands, migration inspector, widget inspector, performance profiler, tinker, env inspector)
-composer require codechap/yii2-ai-boost:1.2.5-beta.1 --dev
+# Beta release (16 tools - includes semantic search, model inspector, validation rules, console commands, migration inspector, widget inspector, performance profiler, tinker, env inspector)
+composer require codechap/yii2-ai-boost:1.3.0-beta.1 --dev
 ```
 
 ### **Step 2**: Run Installation Wizard
@@ -149,7 +149,7 @@ The server listens on STDIN for JSON-RPC requests and outputs responses to STDOU
 php yii boost/update
 ```
 
-Copies updated guidelines to the relevant folders.
+Updates guidelines, downloads Yii2 guide from GitHub, and rebuilds the FTS5 search index.
 
 ---
 
@@ -158,9 +158,9 @@ Copies updated guidelines to the relevant folders.
 Yii2 AI Boost comes with a rich library of "Context Anchors" in `.ai/guidelines/`. These are Markdown files that define exact structures for Yii2 components (Controllers, Models, Migrations, etc.), preventing AI hallucinations.
 
 ### 1. Active Search (MCP Tool)
-The MCP server includes a `search_guidelines` tool. AI agents (like Claude or Gemini) can use this to "look up" how to do things in Yii2.
+The MCP server includes a `semantic_search` tool powered by SQLite FTS5. AI agents (like Claude or Gemini) can use this to "look up" how to do things in Yii2.
 *   *User:* "How do I create a migration?"
-*   *AI:* Calls `search_guidelines(query="migration")` -> Reads `database/yii-migration.md` -> Writes perfect code.
+*   *AI:* Calls `semantic_search(query="migration")` -> Gets BM25-ranked sections -> Writes perfect code.
 
 ### 2. Passive Context (Editor Rules)
 Run `php yii boost/sync-rules` to bake these guidelines directly into your editor's context.
@@ -234,12 +234,14 @@ Inspect application logs from all configured sources:
 - Filter by time range
 - View stack traces (for in-memory logs)
 
-### 8. `search_guidelines` - Guideline Search
-Search the local Yii2 AI Guidelines database:
-- Find best practices for Controllers, Models, Migrations, etc.
-- Retrieve structural reference code to prevent hallucinations
-- Filter by category (e.g., 'database', 'security', 'views')
-- Returns full Markdown content of the most relevant guides
+### 8. `semantic_search` - Semantic Search (FTS5)
+Search Yii2 guidelines and documentation with full-text search:
+- BM25-ranked results using SQLite FTS5 (replaces grep-based search)
+- Section-level results (relevant sections, not full files)
+- Supports phrases ("active record"), boolean (migration AND database), prefix (migrat*)
+- Indexes bundled guidelines + Yii2 definitive guide from GitHub
+- Porter stemming ("migrating" matches "migration")
+- Grep fallback if FTS5 index not built yet
 
 ### 9. `model_inspector` - Model Inspector (beta release)
 Inspect Active Record models at runtime:
@@ -345,7 +347,7 @@ The Log Inspector features a **multi-reader architecture** supporting three log 
 | **1** | **route_inspector** | ✓ Complete | URL rules, routes, REST endpoints |
 | **1** | **component_inspector** | ✓ Complete | Component listing, classes, configurations |
 | **1** | **log_inspector** | ✓ Complete | File, database, and in-memory logs with filtering |
-| **1** | **search_guidelines** | ✓ Complete | On-demand Yii2 guidelines search with categories |
+| **1** | **semantic_search** | ✓ Complete | FTS5-powered search over guidelines + Yii2 guide |
 | **1** | **database_query** | ✓ Complete | Execute database queries (limited rows) |
 | **2** | **model_inspector** | ✓ Complete | Active Record model analysis, properties, relations |
 | **2** | **validation_rules** | ✓ Complete | Model validation rules, error messages, constraints |
@@ -355,7 +357,7 @@ The Log Inspector features a **multi-reader architecture** supporting three log 
 | **3** | **performance_profiler** | ✓ Complete | EXPLAIN plans, index analysis, missing index detection |
 | **4** | **tinker** | ✓ Complete | Execute arbitrary PHP code in Yii2 application context |
 | **4** | **env_inspector** | ✓ Complete | Environment variables, PHP extensions, system configuration |
-| 5 | semantic_search | 🔲 Planned | SQLite FTS5 search over Yii2 guide + guidelines sourced from GitHub |
+| **5** | **semantic_search** | ✓ Complete | SQLite FTS5 search over Yii2 guide + guidelines sourced from GitHub |
 
 ---
 
@@ -444,7 +446,7 @@ To use these guidelines with Claude Code or other AI tools, add the following li
 @include .ai/guidelines/core/yii2-2.0.45.md
 ```
 
-Your AI assistant can also search additional guidelines on-demand via the `search_guidelines` MCP tool (database, cache, auth, validation, etc.).
+Your AI assistant can also search additional guidelines on-demand via the `semantic_search` MCP tool (database, cache, auth, validation, etc.).
 
 This ensures AI assistants have access to framework best practices and patterns when working in your project.
 
@@ -495,7 +497,7 @@ _This section will be expanded as common questions arise. For now, please reach 
 | **2** | Model & Command Introspection | ✓ Complete | +3 tools (model inspector, validation rules, console commands) |
 | **3** | Extended Tools | ✓ Complete | +3 tools (migration inspector, widget inspector, performance profiler) |
 | **4** | Advanced Tools | ✓ Complete | +2 tools (tinker, env inspector) |
-| **5** | Semantic Search | Planned | SQLite FTS5 index, GitHub content pipeline, ranked search |
+| **5** | Semantic Search | ✓ Complete | SQLite FTS5 index, GitHub content pipeline, BM25-ranked search |
 
 Track progress and contribute at [GitHub](https://github.com/codechap/yii2-ai-boost).
 

@@ -1,0 +1,44 @@
+[
+    {
+        "name": "README.md",
+        "path": "docs/guide/README.md",
+        "sha": "abc123",
+        "type": "file",
+        "size": 1234
+    },
+    {
+        "name": "db-migrations.md",
+        "path": "docs/guide/db-migrations.md",
+        "sha": "def456",
+        "type": "file",
+        "size": 40000
+    },
+    {
+        "name": "db-active-record.md",
+        "path": "docs/guide/db-active-record.md",
+        "sha": "ghi789",
+        "type": "file",
+        "size": 72000
+    },
+    {
+        "name": "security-authentication.md",
+        "path": "docs/guide/security-authentication.md",
+        "sha": "jkl012",
+        "type": "file",
+        "size": 15000
+    },
+    {
+        "name": "start-installation.md",
+        "path": "docs/guide/start-installation.md",
+        "sha": "mno345",
+        "type": "file",
+        "size": 8000
+    },
+    {
+        "name": "images",
+        "path": "docs/guide/images",
+        "sha": "pqr678",
+        "type": "dir",
+        "size": 0
+    }
+]

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Mcp\Search\MarkdownSectionParser;
+use codechap\yii2boost\Mcp\Search\SearchIndexManager;
 use Yii;
 use yii\console\Controller;
 use yii\console\ExitCode;
@@ -32,21 +34,25 @@ class InstallController extends Controller
 
         try {
             // Step 1: Detect environment
-            $this->stdout("[1/4] Detecting Environment\n", 33);
+            $this->stdout("[1/5] Detecting Environment\n", 33);
             $envInfo = $this->detectEnvironment();
             $this->outputEnvironmentInfo($envInfo);
 
             // Step 2: Create directories
-            $this->stdout("\n[2/4] Creating Directories\n", 33);
+            $this->stdout("\n[2/5] Creating Directories\n", 33);
             $this->createDirectories();
 
             // Step 3: Generate configuration files
-            $this->stdout("\n[3/4] Generating Configuration Files\n", 33);
+            $this->stdout("\n[3/5] Generating Configuration Files\n", 33);
             $this->generateConfigFiles($envInfo);
 
             // Step 4: Set guidelines
-            $this->stdout("\n[4/4] Setting Guidelines\n", 33);
+            $this->stdout("\n[4/5] Setting Guidelines\n", 33);
             $this->setGuidelines();
+
+            // Step 5: Build search index
+            $this->stdout("\n[5/5] Building Search Index\n", 33);
+            $this->buildSearchIndex();
 
             // Success message
             $this->outputSuccessMessage($envInfo);
@@ -268,6 +274,60 @@ class InstallController extends Controller
     }
 
     /**
+     * Build the FTS5 search index from bundled guidelines
+     */
+    private function buildSearchIndex(): void
+    {
+        if (!SearchIndexManager::isFts5Available()) {
+            $this->stdout("  ! FTS5 extension not available. Search index not built.\n", 33);
+            return;
+        }
+
+        $appPath = Yii::getAlias('@app');
+        $guidelinesPath = $appPath . '/.ai/guidelines';
+
+        if (!is_dir($guidelinesPath)) {
+            $this->stdout("  ! No guidelines to index.\n", 33);
+            return;
+        }
+
+        $dbPath = Yii::getAlias('@runtime') . '/boost/search.db';
+        $manager = new SearchIndexManager($dbPath);
+        $manager->createSchema();
+        $manager->clearIndex();
+
+        $parser = new MarkdownSectionParser();
+        $totalSections = 0;
+
+        $files = FileHelper::findFiles($guidelinesPath, [
+            'only' => ['*.md'],
+            'recursive' => true,
+        ]);
+
+        foreach ($files as $file) {
+            $relativePath = str_replace($appPath . '/.ai/guidelines/', '', $file);
+            $category = dirname($relativePath);
+            $content = file_get_contents($file);
+            $parsed = $parser->parse($content, $file);
+
+            $count = $manager->indexSections(
+                'bundled',
+                $category,
+                $relativePath,
+                $parsed['file_title'],
+                $parsed['sections']
+            );
+            $totalSections += $count;
+        }
+
+        $manager->setMeta('last_rebuild', date('Y-m-d H:i:s'));
+        $manager->setMeta('section_count', (string) $totalSections);
+
+        $this->stdout("  ✓ Search index built: {$totalSections} sections\n", 32);
+        $this->stdout("  Tip: Run 'php yii boost/update' to also index the Yii2 guide.\n", 33);
+    }
+
+    /**
      * Output success message
      *
      * @param array $envInfo Environment information
@@ -282,8 +342,8 @@ class InstallController extends Controller
         $this->stdout("Next steps:\n", 36);
         $this->stdout("  1. (Optional) Add core guidelines to your CLAUDE.md file:\n", 0);
         $this->stdout("     @include .ai/guidelines/core/yii2-2.0.45.md\n\n", 37);
-        $this->stdout("  2. Your AI assistant can search additional guidelines on-demand\n", 0);
-        $this->stdout("     via the 'search_guidelines' MCP tool\n", 37);
+        $this->stdout("  2. Your AI assistant can search guidelines on-demand\n", 0);
+        $this->stdout("     via the 'semantic_search' MCP tool (FTS5-powered)\n", 37);
         $this->stdout("     (database, cache, auth, etc.)\n\n", 37);
         $this->stdout("  3. Test MCP server: php yii boost/mcp\n", 0);
         $this->stdout("  4. View configuration: php yii boost/info\n\n", 0);

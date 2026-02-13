@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Mcp\Search\GitHubGuideDownloader;
+use codechap\yii2boost\Mcp\Search\MarkdownSectionParser;
+use codechap\yii2boost\Mcp\Search\SearchIndexManager;
 use Yii;
 use yii\console\Controller;
 use yii\console\ExitCode;
@@ -30,10 +33,16 @@ class UpdateController extends Controller
         $this->stdout("└───────────────────────────────────────────┘\n\n", 32);
 
         try {
-            $this->stdout("[1/2] Updating Guidelines\n", 33);
+            $this->stdout("[1/4] Updating Guidelines\n", 33);
             $this->updateGuidelines();
 
-            $this->stdout("\n[2/2] Verifying Installation\n", 33);
+            $this->stdout("\n[2/4] Fetching Yii2 Guide from GitHub\n", 33);
+            $this->fetchYii2Guide();
+
+            $this->stdout("\n[3/4] Building Search Index\n", 33);
+            $this->buildSearchIndex();
+
+            $this->stdout("\n[4/4] Verifying Installation\n", 33);
             $this->verifyInstallation();
 
             $this->stdout("\n", 0);
@@ -80,6 +89,121 @@ class UpdateController extends Controller
     }
 
     /**
+     * Fetch Yii2 definitive guide from GitHub
+     */
+    private function fetchYii2Guide(): void
+    {
+        $appPath = Yii::getAlias('@app');
+        $cachePath = $appPath . '/.ai/yii2-guide';
+
+        $downloader = new GitHubGuideDownloader($cachePath);
+
+        $this->stdout("  Downloading from GitHub...\n", 0);
+
+        $result = $downloader->download();
+
+        if ($result['downloaded'] > 0) {
+            $this->stdout("  ✓ Downloaded {$result['downloaded']} guide files\n", 32);
+        }
+        if ($result['skipped'] > 0) {
+            $this->stdout("  ✓ {$result['skipped']} files already up-to-date\n", 32);
+        }
+        if ($result['failed'] > 0) {
+            $this->stdout("  ! {$result['failed']} files failed to download\n", 33);
+        }
+        if (!empty($result['errors'])) {
+            foreach ($result['errors'] as $error) {
+                $this->stdout("  ! $error\n", 33);
+            }
+        }
+
+        // If nothing was downloaded and no cache exists, warn
+        if ($result['downloaded'] === 0 && $result['skipped'] === 0 && !$downloader->hasCachedFiles()) {
+            $this->stdout("  ! Guide download failed. Bundled guidelines will still be indexed.\n", 33);
+        }
+    }
+
+    /**
+     * Build the FTS5 search index
+     */
+    private function buildSearchIndex(): void
+    {
+        if (!SearchIndexManager::isFts5Available()) {
+            $this->stdout("  ! FTS5 extension not available. Search index not built.\n", 33);
+            return;
+        }
+
+        $appPath = Yii::getAlias('@app');
+        $dbPath = Yii::getAlias('@runtime') . '/boost/search.db';
+
+        $manager = new SearchIndexManager($dbPath);
+        $manager->createSchema();
+        $manager->clearIndex();
+
+        $parser = new MarkdownSectionParser();
+        $totalSections = 0;
+
+        // Index bundled guidelines
+        $guidelinesPath = $appPath . '/.ai/guidelines';
+        if (is_dir($guidelinesPath)) {
+            $files = \yii\helpers\FileHelper::findFiles($guidelinesPath, [
+                'only' => ['*.md'],
+                'recursive' => true,
+            ]);
+
+            foreach ($files as $file) {
+                $relativePath = str_replace($appPath . '/.ai/guidelines/', '', $file);
+                $category = dirname($relativePath);
+                $content = file_get_contents($file);
+                $parsed = $parser->parse($content, $file);
+
+                $count = $manager->indexSections(
+                    'bundled',
+                    $category,
+                    $relativePath,
+                    $parsed['file_title'],
+                    $parsed['sections']
+                );
+                $totalSections += $count;
+            }
+
+            $this->stdout("  ✓ Indexed bundled guidelines: {$totalSections} sections\n", 32);
+        }
+
+        // Index Yii2 guide (if cached)
+        $guidePath = $appPath . '/.ai/yii2-guide';
+        if (is_dir($guidePath)) {
+            $guideDownloader = new GitHubGuideDownloader($guidePath);
+            $guideFiles = $guideDownloader->getCachedFiles();
+            $guideSections = 0;
+
+            foreach ($guideFiles as $file) {
+                $filename = basename($file);
+                $category = GitHubGuideDownloader::mapCategory($filename);
+                $content = file_get_contents($file);
+                $parsed = $parser->parse($content, $file);
+
+                $count = $manager->indexSections(
+                    'yii2_guide',
+                    $category,
+                    $filename,
+                    $parsed['file_title'],
+                    $parsed['sections']
+                );
+                $guideSections += $count;
+            }
+
+            $totalSections += $guideSections;
+            $this->stdout("  ✓ Indexed Yii2 guide: {$guideSections} sections\n", 32);
+        }
+
+        $manager->setMeta('last_rebuild', date('Y-m-d H:i:s'));
+        $manager->setMeta('section_count', (string) $totalSections);
+
+        $this->stdout("  ✓ Search index built: {$totalSections} total sections\n", 32);
+    }
+
+    /**
      * Verify installation
      */
     private function verifyInstallation(): void
@@ -98,6 +222,15 @@ class UpdateController extends Controller
             } else {
                 $this->stdout("  ✗ $file missing\n", 31);
             }
+        }
+
+        // Check search index
+        $searchDb = Yii::getAlias('@runtime') . '/boost/search.db';
+        if (file_exists($searchDb)) {
+            $sizeKb = round(filesize($searchDb) / 1024, 1);
+            $this->stdout("  ✓ Search index ({$sizeKb}KB)\n", 32);
+        } else {
+            $this->stdout("  ✗ Search index not built\n", 31);
         }
     }
 }

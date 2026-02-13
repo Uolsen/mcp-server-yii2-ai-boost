@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Mcp\Search\SearchIndexManager;
 use Yii;
 use yii\console\Controller;
 use yii\console\ExitCode;
@@ -34,6 +35,7 @@ class InfoController extends Controller
             $this->displayConfigStatus();
             $this->displayTools();
             $this->displayGuidelines();
+            $this->displaySearchIndex();
 
             return ExitCode::OK;
         } catch (\Exception $e) {
@@ -128,6 +130,44 @@ class InfoController extends Controller
             foreach ($files as $file) {
                 $this->stdout("  ✓ " . basename($file) . "\n", 32);
             }
+        }
+
+        $this->stdout("\n", 0);
+    }
+
+    /**
+     * Display search index status
+     */
+    private function displaySearchIndex(): void
+    {
+        $this->stdout("Search Index\n", 33);
+        $this->stdout("─────────────────────────────────────────\n", 33);
+
+        $searchDb = Yii::getAlias('@runtime') . '/boost/search.db';
+
+        if (!file_exists($searchDb)) {
+            $this->stdout("  ✗ Not built (run 'php yii boost/update')\n", 31);
+            $this->stdout("\n", 0);
+            return;
+        }
+
+        try {
+            $manager = new SearchIndexManager($searchDb);
+            $stats = $manager->getStats();
+
+            $sizeKb = round(filesize($searchDb) / 1024, 1);
+            $this->stdout("  ✓ Index size: {$sizeKb}KB\n", 32);
+            $this->stdout("  ✓ Total sections: {$stats['total_sections']}\n", 32);
+            $this->stdout("  ✓ Last rebuild: {$stats['last_rebuild']}\n", 32);
+
+            if (!empty($stats['sources'])) {
+                foreach ($stats['sources'] as $source => $count) {
+                    $label = $source === 'yii2_guide' ? 'Yii2 Guide' : 'Bundled';
+                    $this->stdout("    - {$label}: {$count} sections\n", 36);
+                }
+            }
+        } catch (\Exception $e) {
+            $this->stdout("  ! Error reading index: " . $e->getMessage() . "\n", 33);
         }
 
         $this->stdout("\n", 0);

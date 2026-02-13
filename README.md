@@ -1,6 +1,6 @@
 # Yii2 AI Boost - MCP Server for Yii2 Applications
 
-![Version](https://img.shields.io/badge/version-1.2.4--beta.1-blue)
+![Version](https://img.shields.io/badge/version-1.2.5--beta.1-blue)
 ![License](https://img.shields.io/badge/license-BSD--3--Clause-green)
 ![Yii2](https://img.shields.io/badge/Yii2-2.0.45-orange)
 
@@ -10,7 +10,7 @@ Yii2 AI Boost is a Model Context Protocol (MCP) server that provides AI assistan
 
 ## Features
 
-- **14 MCP Tools** - Database inspection and queries, config access, route analysis, component introspection, model and validation inspection, console command discovery, migration inspection, widget inspection, performance profiling, logging, and guideline search
+- **16 MCP Tools** - Database inspection and queries, config access, route analysis, component introspection, model and validation inspection, console command discovery, migration inspection, widget inspection, performance profiling, PHP tinker, environment inspection, logging, and guideline search
 - **On-Demand Guidelines** - AI searches 36KB of Yii2 best practices only when needed (zero context cost until requested)
 - **Framework Guidelines** - Comprehensive Yii2 patterns covering controllers, models, migrations, caching, auth, and more
 - **IDE Integration** - Works with Claude Code, Cursor, Zed, and other MCP-compatible editors
@@ -25,8 +25,8 @@ For experienced developers:
 # 1. Install stable release
 composer require codechap/yii2-ai-boost:^1.1 --dev
 
-# Or install beta (includes model_inspector, validation_rules, console_command_inspector, migration_inspector, widget_inspector, performance_profiler)
-composer require codechap/yii2-ai-boost:1.2.4-beta.1 --dev
+# Or install beta (includes model_inspector, validation_rules, console_command_inspector, migration_inspector, widget_inspector, performance_profiler, tinker, env_inspector)
+composer require codechap/yii2-ai-boost:1.2.5-beta.1 --dev
 
 # 2. Run installation
 php yii boost/install
@@ -49,8 +49,8 @@ cd /path/to/yii2/application
 # Stable release (8 core tools)
 composer require codechap/yii2-ai-boost:^1.1 --dev
 
-# Beta release (14 tools - includes model inspector, validation rules, console commands, migration inspector, widget inspector, performance profiler)
-composer require codechap/yii2-ai-boost:1.2.4-beta.1 --dev
+# Beta release (16 tools - includes model inspector, validation rules, console commands, migration inspector, widget inspector, performance profiler, tinker, env inspector)
+composer require codechap/yii2-ai-boost:1.2.5-beta.1 --dev
 ```
 
 ### **Step 2**: Run Installation Wizard
@@ -295,9 +295,28 @@ Analyze query performance and index coverage:
 - Overview mode with per-table summary and missing-index report across all tables
 - Supports bound parameters for parameterized query analysis
 
+### 15. `tinker` - Tinker (beta release)
+Execute arbitrary PHP code in the Yii2 application context:
+- Run any PHP expression or statement with full access to `\Yii::$app`
+- Automatic return value capture (tries expression first, falls back to statement)
+- Output capture for `echo`/`print` statements
+- Configurable timeout (default 5s, max 30s)
+- Dangerous function blocking (exit, die, shell_exec, system, exec, etc.)
+- Return values formatted with `VarDumper` for objects
+- Output truncated at 100KB, sensitive data automatically redacted
+
+### 16. `env_inspector` - Environment Inspector (beta release)
+Inspect environment variables, PHP extensions, and system configuration:
+- Environment variables with automatic sensitive value redaction
+- Prefix filter for environment variables (e.g., "DB", "APP")
+- Loaded PHP extensions sorted alphabetically with count
+- Key PHP configuration values (memory_limit, max_execution_time, upload sizes, etc.)
+- System info: OS, architecture (32/64-bit), working directory
+- Configurable sections via `include` parameter
+
 ## Core Tools Architecture
 
-All 14 tools provide deep introspection into your Yii2 application. They follow a consistent architecture based on the **BaseTool** abstract class, which provides:
+All 16 tools provide deep introspection into your Yii2 application. They follow a consistent architecture based on the **BaseTool** abstract class, which provides:
 
 - **Automatic Sanitization**: Sensitive data (passwords, tokens, keys) is automatically redacted from all tool outputs
 - **Database Discovery**: Tools automatically detect and access configured database connections
@@ -334,8 +353,8 @@ The Log Inspector features a **multi-reader architecture** supporting three log 
 | **3** | **migration_inspector** | ✓ Complete | Migration status, history, pending, source viewing |
 | **3** | **widget_inspector** | ✓ Complete | Available widgets, properties, methods, events, hierarchy |
 | **3** | **performance_profiler** | ✓ Complete | EXPLAIN plans, index analysis, missing index detection |
-| 4 | tinker | 🔲 Planned | Execute arbitrary PHP code in Yii2 application context |
-| 4 | env_inspector | 🔲 Planned | Environment variables, PHP extensions, system configuration |
+| **4** | **tinker** | ✓ Complete | Execute arbitrary PHP code in Yii2 application context |
+| **4** | **env_inspector** | ✓ Complete | Environment variables, PHP extensions, system configuration |
 | 5 | semantic_search | 🔲 Planned | SQLite FTS5 search over Yii2 guide + guidelines sourced from GitHub |
 
 ---
@@ -475,7 +494,7 @@ _This section will be expanded as common questions arise. For now, please reach 
 | **1** | Core MVP | ✓ Complete | 8 tools + guidelines + installer   |
 | **2** | Model & Command Introspection | ✓ Complete | +3 tools (model inspector, validation rules, console commands) |
 | **3** | Extended Tools | ✓ Complete | +3 tools (migration inspector, widget inspector, performance profiler) |
-| **4** | Advanced Tools | Planned | Tinker, env inspector |
+| **4** | Advanced Tools | ✓ Complete | +2 tools (tinker, env inspector) |
 | **5** | Semantic Search | Planned | SQLite FTS5 index, GitHub content pipeline, ranked search |
 
 Track progress and contribute at [GitHub](https://github.com/codechap/yii2-ai-boost).

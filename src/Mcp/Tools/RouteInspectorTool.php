@@ -56,10 +56,21 @@ final class RouteInspectorTool extends BaseTool
             return $this->getModuleRoutes($module, $includePatterns);
         }
 
-        return [
+        $result = [
             'url_rules' => $this->getUrlRules($includePatterns),
             'modules' => $this->getModuleRoutes(null, $includePatterns),
         ];
+
+        // If no URL rules found (likely running in console context), try parsing web config
+        if (empty($result['url_rules'])) {
+            $webRules = $this->getWebConfigUrlRules();
+            if (!empty($webRules)) {
+                $result['url_rules'] = $webRules;
+                $result['source'] = 'parsed from web config (MCP server runs in console context)';
+            }
+        }
+
+        return $result;
     }
 
     /**
@@ -196,5 +207,127 @@ final class RouteInspectorTool extends BaseTool
             '$1-$2',
             $string
         ));
+    }
+
+    /**
+     * Parse web config files to extract URL rules when running in console context.
+     *
+     * Searches common Yii2 config locations for urlManager rules.
+     *
+     * @return array Extracted URL rules
+     */
+    private function getWebConfigUrlRules(): array
+    {
+        $basePath = $this->basePath;
+
+        // Common web config file locations for Yii2 applications
+        $candidates = [
+            $basePath . '/config/web.php',
+            $basePath . '/config/main.php',
+            $basePath . '/config/main-local.php',
+            $basePath . '/../common/config/main.php',
+            $basePath . '/../common/config/main-local.php',
+            $basePath . '/../frontend/config/main.php',
+            $basePath . '/../backend/config/main.php',
+        ];
+
+        $allRules = [];
+
+        foreach ($candidates as $configFile) {
+            if (!file_exists($configFile)) {
+                continue;
+            }
+
+            $rules = $this->extractUrlRulesFromConfig($configFile);
+            if (!empty($rules)) {
+                foreach ($rules as $rule) {
+                    $rule['config_file'] = basename(dirname($configFile)) . '/' . basename($configFile);
+                    $allRules[] = $rule;
+                }
+            }
+        }
+
+        return $allRules;
+    }
+
+    /**
+     * Extract URL rules from a config file by parsing the returned array.
+     *
+     * @param string $configFile Absolute path to config file
+     * @return array Extracted URL rules
+     */
+    private function extractUrlRulesFromConfig(string $configFile): array
+    {
+        try {
+            // Safely include the config file — it returns an array
+            $config = @include $configFile;
+
+            if (!is_array($config)) {
+                return [];
+            }
+
+            // Look for urlManager rules in components
+            $urlManagerConfig = $config['components']['urlManager'] ?? null;
+            if (!is_array($urlManagerConfig)) {
+                return [];
+            }
+
+            $rawRules = $urlManagerConfig['rules'] ?? [];
+            if (empty($rawRules)) {
+                return [];
+            }
+
+            $rules = [];
+            foreach ($rawRules as $key => $value) {
+                if (is_string($key) && is_string($value)) {
+                    // Simple format: 'pattern' => 'route'
+                    $rules[] = [
+                        'pattern' => $key,
+                        'route' => $value,
+                    ];
+                } elseif (is_array($value)) {
+                    // Array format with class, pattern, route, verb, etc.
+                    $rule = [];
+
+                    if (is_string($key)) {
+                        $rule['pattern'] = $key;
+                    } elseif (isset($value['pattern'])) {
+                        $rule['pattern'] = $value['pattern'];
+                    }
+
+                    if (isset($value['route'])) {
+                        $rule['route'] = $value['route'];
+                    }
+
+                    if (isset($value['class'])) {
+                        $rule['class'] = $value['class'];
+                    }
+
+                    if (isset($value['verb'])) {
+                        $rule['verb'] = is_array($value['verb'])
+                            ? $value['verb']
+                            : explode(',', $value['verb']);
+                    }
+
+                    if (isset($value['suffix'])) {
+                        $rule['suffix'] = $value['suffix'];
+                    }
+
+                    if (!empty($rule)) {
+                        $rules[] = $rule;
+                    }
+                } elseif (is_string($value)) {
+                    // Numeric key with string value: just a route pattern
+                    $rules[] = [
+                        'pattern' => $value,
+                    ];
+                }
+            }
+
+            return $rules;
+        } catch (\Throwable $e) {
+            // Config file may have dependencies that aren't available
+            return [];
+        }
     }
 }

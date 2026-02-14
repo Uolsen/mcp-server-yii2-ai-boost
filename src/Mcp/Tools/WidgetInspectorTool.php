@@ -358,7 +358,7 @@ final class WidgetInspectorTool extends BaseTool
 
         throw new \Exception(
             "Widget '$name' not found. Provide a full class name or ensure it exists "
-            . "in yii\\widgets\\, yii\\grid\\, or @app/widgets/."
+            . "in yii\\widgets\\, yii\\grid\\, @app/widgets/, or module widgets/ directories."
         );
     }
 
@@ -393,17 +393,50 @@ final class WidgetInspectorTool extends BaseTool
     }
 
     /**
-     * Discover widgets in @app/widgets directory
+     * Discover widgets in @app/widgets and module widget directories
      *
      * @return array
      */
     private function discoverAppWidgets(): array
     {
-        $path = Yii::getAlias('@app/widgets', false);
-        if ($path === false || !is_dir($path)) {
-            return [];
+        $widgets = [];
+
+        // Scan @app/widgets/
+        $appWidgetsPath = Yii::getAlias('@app/widgets', false);
+        if ($appWidgetsPath !== false && is_dir($appWidgetsPath)) {
+            $widgets = array_merge($widgets, $this->scanDirectoryForWidgets($appWidgetsPath));
         }
 
+        // Scan module widget directories
+        $modulesPath = Yii::getAlias('@app/modules', false);
+        if ($modulesPath !== false && is_dir($modulesPath)) {
+            $modulesDirIterator = new \DirectoryIterator($modulesPath);
+            foreach ($modulesDirIterator as $moduleDir) {
+                if ($moduleDir->isDot() || !$moduleDir->isDir()) {
+                    continue;
+                }
+
+                $moduleWidgetsPath = $moduleDir->getPathname() . '/widgets';
+                if (is_dir($moduleWidgetsPath)) {
+                    $widgets = array_merge(
+                        $widgets,
+                        $this->scanDirectoryForWidgets($moduleWidgetsPath)
+                    );
+                }
+            }
+        }
+
+        return $widgets;
+    }
+
+    /**
+     * Scan a directory recursively for Widget classes
+     *
+     * @param string $path Directory to scan
+     * @return array Found widgets
+     */
+    private function scanDirectoryForWidgets(string $path): array
+    {
         $widgets = [];
         $iterator = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($path, \RecursiveDirectoryIterator::SKIP_DOTS),
@@ -413,7 +446,7 @@ final class WidgetInspectorTool extends BaseTool
         foreach ($iterator as $file) {
             if ($file->isFile() && $file->getExtension() === 'php') {
                 $className = $this->getClassNameFromFile($file->getPathname());
-                if ($className !== null && $this->isWidgetClass($className) && class_exists($className)) {
+                if ($className !== null && class_exists($className) && $this->isWidgetClass($className)) {
                     $ref = new \ReflectionClass($className);
                     $widgets[] = [
                         'class' => $className,

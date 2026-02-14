@@ -98,21 +98,34 @@ final class DatabaseQueryTool extends BaseTool
                 }
             }
 
-            // Execute and get results
             $startTime = microtime(true);
-            $rows = $command->queryAll();
-            $duration = round((microtime(true) - $startTime) * 1000, 2);
 
-            $result = [
-                'success' => true,
-                'row_count' => count($rows),
-                'duration_ms' => $duration,
-                'rows' => $this->sanitize($rows),
-            ];
+            // Detect query type: SELECT uses queryAll(), everything else uses execute()
+            if ($this->isSelectQuery($sql)) {
+                $rows = $command->queryAll();
+                $duration = round((microtime(true) - $startTime) * 1000, 2);
 
-            // Warn if results were likely truncated
-            if (count($rows) === $limit) {
-                $result['warning'] = "Results may be truncated at $limit rows. Use 'limit' parameter to increase.";
+                $result = [
+                    'success' => true,
+                    'row_count' => count($rows),
+                    'duration_ms' => $duration,
+                    'rows' => $this->sanitize($rows),
+                ];
+
+                // Warn if results were likely truncated
+                if (count($rows) === $limit) {
+                    $result['warning'] = "Results may be truncated at $limit rows. "
+                        . "Use 'limit' parameter to increase.";
+                }
+            } else {
+                $affectedRows = $command->execute();
+                $duration = round((microtime(true) - $startTime) * 1000, 2);
+
+                $result = [
+                    'success' => true,
+                    'affected_rows' => $affectedRows,
+                    'duration_ms' => $duration,
+                ];
             }
 
             return $result;
@@ -123,6 +136,17 @@ final class DatabaseQueryTool extends BaseTool
                 'sql' => $sql,
             ];
         }
+    }
+
+    /**
+     * Check if a SQL statement is a SELECT query
+     *
+     * @param string $sql SQL query
+     * @return bool
+     */
+    private function isSelectQuery(string $sql): bool
+    {
+        return (bool) preg_match('/^\s*SELECT\s/i', trim($sql));
     }
 
     /**
@@ -138,7 +162,7 @@ final class DatabaseQueryTool extends BaseTool
 
         // Only add LIMIT to SELECT statements that don't already have one
         if (
-            preg_match('/^\s*SELECT\s/i', $trimmedSql) &&
+            $this->isSelectQuery($trimmedSql) &&
             !preg_match('/\sLIMIT\s+\d+/i', $trimmedSql)
         ) {
             // Remove trailing semicolon if present

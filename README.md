@@ -285,7 +285,8 @@ Discover and inspect Yii2 widgets:
 - Event constants (EVENT_*) with declaring class
 - Class hierarchy chain up to yii\base\Widget
 - Short name resolution (e.g., "ActiveForm" resolves to yii\widgets\ActiveForm)
-- Discovers widgets from @app/widgets/ directory
+- Discovers widgets from @app/widgets/, @app/components/, and modules/*/widgets/ + modules/*/components/
+- **Note**: Yii2 allows widgets anywhere in the codebase. Auto-discovery scans the directories above; widgets in other locations can still be inspected by passing the full class name (e.g., `widget: "app\\custom\\MyWidget"`)
 
 ### 14. `performance_profiler` - Performance Profiler (beta release)
 Analyze query performance and index coverage:

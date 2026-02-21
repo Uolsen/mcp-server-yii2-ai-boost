@@ -33,7 +33,9 @@ final class DatabaseQueryTool extends BaseTool
 
     public function getDescription(): string
     {
-        return 'Execute SQL queries against the database and return results';
+        return 'Execute SQL queries against the database and return results. '
+             . 'IMPORTANT: Always use database_schema tool first to inspect table columns before writing queries. '
+             . 'Do not guess column names.';
     }
 
     public function getInputSchema(): array
@@ -132,11 +134,27 @@ final class DatabaseQueryTool extends BaseTool
 
             return $result;
         } catch (\Exception $e) {
-            return [
+            $errorResult = [
                 'success' => false,
                 'error' => $e->getMessage(),
                 'sql' => $sql,
             ];
+
+            // On column/table errors, include schema hints so the AI can self-correct
+            $errorMsg = $e->getMessage();
+            if (
+                stripos($errorMsg, 'Unknown column') !== false
+                || stripos($errorMsg, 'Column not found') !== false
+                || stripos($errorMsg, 'no such column') !== false
+                || stripos($errorMsg, 'Unknown table') !== false
+                || stripos($errorMsg, 'Table') !== false && stripos($errorMsg, "doesn't exist") !== false
+                || stripos($errorMsg, 'Base table or view not found') !== false
+            ) {
+                $errorResult['hint'] = 'Use the database_schema tool to inspect table columns before writing queries.';
+                $errorResult['available_columns'] = $this->getColumnsForTablesInQuery($sql, $db);
+            }
+
+            return $errorResult;
         }
     }
 
@@ -149,6 +167,48 @@ final class DatabaseQueryTool extends BaseTool
     private function isSelectQuery(string $sql): bool
     {
         return (bool) preg_match('/^\s*SELECT\s/i', trim($sql));
+    }
+
+    /**
+     * Extract table names from SQL and return their columns for error hints.
+     *
+     * @param string $sql The SQL query
+     * @param object $db Database connection
+     * @return array Table => column list mapping
+     */
+    private function getColumnsForTablesInQuery(string $sql, object $db): array
+    {
+        $columns = [];
+
+        // Extract table names from FROM and JOIN clauses
+        // Matches: FROM tablename [alias], JOIN tablename [alias]
+        $pattern = '/(?:FROM|JOIN)\s+`?(\w+)`?(?:\s+(?:AS\s+)?`?(\w+)`?)?/i';
+        if (!preg_match_all($pattern, $sql, $matches)) {
+            return $columns;
+        }
+
+        $schema = $db->getSchema();
+        foreach ($matches[1] as $i => $tableName) {
+            $alias = !empty($matches[2][$i]) ? $matches[2][$i] : null;
+            $label = $alias ? "$tableName ($alias)" : $tableName;
+
+            // Skip if we already got this table
+            if (isset($columns[$label])) {
+                continue;
+            }
+
+            try {
+                $tableSchema = $schema->getTableSchema($tableName);
+                if ($tableSchema) {
+                    $columns[$label] = array_keys($tableSchema->columns);
+                }
+            } catch (\Exception $e) {
+                // Table doesn't exist or other error
+                $columns[$label] = 'table not found';
+            }
+        }
+
+        return $columns;
     }
 
     /**

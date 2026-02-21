@@ -37,7 +37,7 @@ final class ApplicationInfoTool extends BaseTool
                 'include' => [
                     'type' => 'array',
                     'items' => ['type' => 'string'],
-                    'description' => 'Specific info to include: version, environment, modules, extensions, all',
+                    'description' => 'Specific info to include: version, environment, modules, extensions, database, all',
                 ],
             ],
         ];
@@ -45,7 +45,7 @@ final class ApplicationInfoTool extends BaseTool
 
     public function execute(array $arguments): mixed
     {
-        $include = $arguments['include'] ?? ['version', 'environment', 'modules', 'extensions'];
+        $include = $arguments['include'] ?? ['version', 'environment', 'modules', 'extensions', 'database'];
 
         $result = [];
 
@@ -63,6 +63,10 @@ final class ApplicationInfoTool extends BaseTool
 
         if (in_array('extensions', $include) || in_array('all', $include)) {
             $result['extensions'] = $this->getExtensionsInfo();
+        }
+
+        if (in_array('database', $include) || in_array('all', $include)) {
+            $result['database'] = $this->getDatabaseInfo();
         }
 
         return $result;
@@ -155,5 +159,39 @@ final class ApplicationInfoTool extends BaseTool
         }
 
         return $extensions;
+    }
+
+    /**
+     * Get database connection information
+     *
+     * @return array
+     */
+    private function getDatabaseInfo(): array
+    {
+        $connections = [];
+
+        // Main database connection
+        if (Yii::$app->has('db')) {
+            $connections['db'] = $this->getDbConnectionInfo('db');
+        }
+
+        // Scan for additional database connections
+        foreach (Yii::$app->getComponents() as $name => $config) {
+            if ($name === 'db') {
+                continue;
+            }
+            $isDbConnection = false;
+            if (is_array($config) && isset($config['class'])) {
+                $isDbConnection = stripos($config['class'], 'Connection') !== false
+                    && stripos($config['class'], 'db\\') !== false;
+            } elseif (is_object($config) && $config instanceof \yii\db\Connection) {
+                $isDbConnection = true;
+            }
+            if ($isDbConnection) {
+                $connections[$name] = $this->getDbConnectionInfo($name);
+            }
+        }
+
+        return $connections;
     }
 }

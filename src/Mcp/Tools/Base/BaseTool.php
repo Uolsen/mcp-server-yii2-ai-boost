@@ -151,6 +151,68 @@ abstract class BaseTool extends Component
     }
 
     /**
+     * Extract the database name from a DSN string
+     *
+     * Supports common DSN formats:
+     * - mysql:host=localhost;dbname=mydb
+     * - pgsql:host=localhost;dbname=mydb
+     * - sqlite:/path/to/database.db
+     *
+     * @param string $dsn Database DSN
+     * @return string|null Database name or null if not found
+     */
+    protected function getDbNameFromDsn(string $dsn): ?string
+    {
+        // SQLite: the "database name" is the file path
+        if (strpos($dsn, 'sqlite:') === 0) {
+            return substr($dsn, 7) ?: null;
+        }
+
+        // Match dbname= parameter (MySQL, PostgreSQL, etc.)
+        if (preg_match('/dbname=([^;]+)/i', $dsn, $matches)) {
+            return $matches[1];
+        }
+
+        return null;
+    }
+
+    /**
+     * Get safe database connection info (database name, driver, host — no credentials)
+     *
+     * @param string $componentName Yii2 component name (e.g. 'db')
+     * @return array Connection info safe to expose
+     */
+    protected function getDbConnectionInfo(string $componentName = 'db'): array
+    {
+        if (!\Yii::$app->has($componentName)) {
+            return ['error' => "Connection '$componentName' not found"];
+        }
+
+        $db = \Yii::$app->get($componentName);
+        $dsn = $db->dsn;
+        $driver = $this->getDbDriver($dsn);
+        $dbName = $this->getDbNameFromDsn($dsn);
+
+        $info = [
+            'component' => $componentName,
+            'driver' => $driver,
+            'database_name' => $dbName,
+        ];
+
+        // Extract host if present
+        if (preg_match('/host=([^;]+)/i', $dsn, $matches)) {
+            $info['host'] = $matches[1];
+        }
+
+        // Extract port if present
+        if (preg_match('/port=([^;]+)/i', $dsn, $matches)) {
+            $info['port'] = $matches[1];
+        }
+
+        return $info;
+    }
+
+    /**
      * Discover Active Record models in the application models directory
      *
      * @return array Fully qualified class names

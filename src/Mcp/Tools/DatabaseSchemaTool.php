@@ -68,7 +68,9 @@ final class DatabaseSchemaTool extends BaseTool
         }
 
         $db = Yii::$app->get($dbName);
-        $result = [];
+        $result = [
+            'connection' => $this->getDbConnectionInfo($dbName),
+        ];
 
         if (in_array('tables', $include)) {
             $result['tables'] = $this->getTables($db, $table);

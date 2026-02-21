@@ -165,15 +165,17 @@ class DevServerTool extends BaseTool
         // Wait briefly for the server to start
         sleep(self::SERVER_STARTUP_WAIT);
 
-        // Verify the process is still running
-        if (!$this->isRunning()) {
-            $stderr = self::$stderrFile ? file_get_contents(self::$stderrFile) : '';
+        // Verify the process is still running (check directly — isRunning()
+        // would be flagged by static analysis since $process was just assigned)
+        $status = proc_get_status(self::$process);
+        if (!$status['running']) {
+            $stderr = (string) file_get_contents(self::$stderrFile);
             $stdout = stream_get_contents($pipes[1]);
             $this->cleanup();
             return [
                 'error' => 'Server process exited immediately.',
-                'stdout' => trim($stdout ?: ''),
-                'stderr' => trim($stderr ?: ''),
+                'stdout' => trim((string) $stdout),
+                'stderr' => trim((string) $stderr),
             ];
         }
 
@@ -279,11 +281,12 @@ class DevServerTool extends BaseTool
         if (self::$stderrFile && file_exists(self::$stderrFile)) {
             clearstatcache(true, self::$stderrFile);
             $stderrAfter = filesize(self::$stderrFile) ?: 0;
-            if ($stderrAfter > $stderrBefore) {
+            $readLength = $stderrAfter - $stderrBefore;
+            if ($readLength > 0) {
                 $fh = fopen(self::$stderrFile, 'r');
                 if ($fh) {
                     fseek($fh, $stderrBefore);
-                    $serverErrors = fread($fh, $stderrAfter - $stderrBefore);
+                    $serverErrors = (string) fread($fh, $readLength);
                     fclose($fh);
                 }
             }
@@ -334,6 +337,7 @@ class DevServerTool extends BaseTool
         $headerSize = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
         curl_close($ch);
 
+        /** @var string $response */
         $headerStr = substr($response, 0, $headerSize);
         $body = substr($response, $headerSize);
 
@@ -392,7 +396,8 @@ class DevServerTool extends BaseTool
         // Parse response headers from $http_response_header
         $httpCode = 0;
         $headers = [];
-        if (isset($http_response_header) && is_array($http_response_header)) {
+        /** @var string[]|null $http_response_header */
+        if (!empty($http_response_header)) {
             foreach ($http_response_header as $line) {
                 if (preg_match('/^HTTP\/[\d.]+ (\d+)/', $line, $m)) {
                     $httpCode = (int) $m[1];
@@ -432,7 +437,7 @@ class DevServerTool extends BaseTool
         }
 
         $status = proc_get_status(self::$process);
-        return $status['running'] ?? false;
+        return $status['running'];
     }
 
     /**
@@ -443,7 +448,7 @@ class DevServerTool extends BaseTool
         if (self::$process !== null) {
             // Get PID before closing pipes
             $status = proc_get_status(self::$process);
-            $pid = $status['pid'] ?? null;
+            $pid = $status['pid'];
 
             // Close pipes first to unblock proc_close
             if (self::$pipes !== null) {
@@ -456,7 +461,7 @@ class DevServerTool extends BaseTool
             }
 
             // Kill the process tree
-            if ($pid && $status['running']) {
+            if ($pid > 0 && $status['running']) {
                 if (PHP_OS_FAMILY === 'Windows') {
                     exec("taskkill /F /T /PID $pid 2>&1");
                 } else {

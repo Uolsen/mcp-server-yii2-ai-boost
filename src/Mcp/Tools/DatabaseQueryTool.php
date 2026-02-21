@@ -107,6 +107,7 @@ final class DatabaseQueryTool extends BaseTool
 
                 $result = [
                     'success' => true,
+                    'connection' => $this->getDbConnectionInfo($dbName),
                     'row_count' => count($rows),
                     'duration_ms' => $duration,
                     'rows' => $this->sanitize($rows),
@@ -123,6 +124,7 @@ final class DatabaseQueryTool extends BaseTool
 
                 $result = [
                     'success' => true,
+                    'connection' => $this->getDbConnectionInfo($dbName),
                     'affected_rows' => $affectedRows,
                     'duration_ms' => $duration,
                 ];

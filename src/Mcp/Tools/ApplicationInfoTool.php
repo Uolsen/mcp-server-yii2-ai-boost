@@ -96,9 +96,16 @@ final class ApplicationInfoTool extends BaseTool
         $result = [
             'yii_env' => YII_ENV,
             'yii_debug' => YII_DEBUG ? true : false,
+            'app_type' => $this->isAdvancedApp ? 'advanced' : 'basic',
             'base_path' => Yii::getAlias('@app'),
+            'project_root' => $this->projectRoot,
             'runtime_path' => Yii::getAlias('@runtime'),
         ];
+
+        // For advanced apps, list all application directories
+        if ($this->isAdvancedApp && $this->projectRoot) {
+            $result['app_directories'] = \codechap\yii2boost\Helpers\ProjectRootResolver::getAppDirectories($this->projectRoot);
+        }
 
         // Try to get web path if it exists (web app only)
         try {

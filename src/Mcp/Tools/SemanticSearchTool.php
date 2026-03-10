@@ -179,7 +179,7 @@ final class SemanticSearchTool extends BaseTool
             return $this->searchDbPath;
         }
 
-        return $this->basePath . '/runtime/boost/search.db';
+        return \Yii::getAlias('@runtime') . '/boost/search.db';
     }
 
     /**
@@ -193,7 +193,8 @@ final class SemanticSearchTool extends BaseTool
      */
     private function grepFallback(string $query, string $category): string
     {
-        $guidelinesPath = $this->basePath . '/.ai/guidelines';
+        $root = $this->projectRoot ?: $this->basePath;
+        $guidelinesPath = $root . '/.ai/guidelines';
 
         if (!is_dir($guidelinesPath)) {
             return "No guidelines found at {$guidelinesPath}. Run 'php yii boost/install' first.";

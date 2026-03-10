@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Mcp\Tools\Base;
 
+use codechap\yii2boost\Helpers\ProjectRootResolver;
 use yii\base\Component;
 
 /**
@@ -14,9 +15,20 @@ use yii\base\Component;
 abstract class BaseTool extends Component
 {
     /**
-     * @var string Base path to the Yii2 application
+     * @var string Base path to the Yii2 application (@app path)
      */
     public $basePath;
+
+    /**
+     * @var string|null Project root path (same as basePath for basic apps,
+     *                  parent directory for advanced apps)
+     */
+    public $projectRoot;
+
+    /**
+     * @var bool Whether this is an advanced Yii2 application
+     */
+    public $isAdvancedApp = false;
 
     /**
      * Get the tool name
@@ -213,28 +225,44 @@ abstract class BaseTool extends Component
     }
 
     /**
-     * Discover Active Record models in the application models directory
+     * Discover Active Record models in the application models directories.
+     *
+     * For advanced apps, scans common/models/, backend/models/, frontend/models/, etc.
+     * For basic apps, scans @app/models/.
      *
      * @return array Fully qualified class names
      */
     protected function getActiveRecordModels(): array
     {
-        $modelsPath = \Yii::getAlias('@app/models');
-        if (!is_dir($modelsPath)) {
-            return [];
+        $modelDirs = [];
+
+        if ($this->isAdvancedApp && $this->projectRoot) {
+            $modelDirs = ProjectRootResolver::getModelDirectories($this->projectRoot);
+        }
+
+        // Always include @app/models as fallback
+        $appModels = \Yii::getAlias('@app/models');
+        if (is_dir($appModels) && !in_array($appModels, $modelDirs, true)) {
+            $modelDirs[] = $appModels;
         }
 
         $models = [];
-        $iterator = new \RecursiveIteratorIterator(
-            new \RecursiveDirectoryIterator($modelsPath, \RecursiveDirectoryIterator::SKIP_DOTS),
-            \RecursiveIteratorIterator::SELF_FIRST
-        );
+        foreach ($modelDirs as $modelsPath) {
+            if (!is_dir($modelsPath)) {
+                continue;
+            }
 
-        foreach ($iterator as $file) {
-            if ($file->isFile() && $file->getExtension() === 'php') {
-                $className = $this->getClassNameFromFile($file->getPathname());
-                if ($className && $this->isActiveRecordModel($className)) {
-                    $models[] = $className;
+            $iterator = new \RecursiveIteratorIterator(
+                new \RecursiveDirectoryIterator($modelsPath, \RecursiveDirectoryIterator::SKIP_DOTS),
+                \RecursiveIteratorIterator::SELF_FIRST
+            );
+
+            foreach ($iterator as $file) {
+                if ($file->isFile() && $file->getExtension() === 'php') {
+                    $className = $this->getClassNameFromFile($file->getPathname());
+                    if ($className && !in_array($className, $models, true) && $this->isActiveRecordModel($className)) {
+                        $models[] = $className;
+                    }
                 }
             }
         }
@@ -335,7 +363,7 @@ abstract class BaseTool extends Component
             return $model;
         }
 
-        // Short name — scan @app/models to find a match
+        // Short name — scan all model directories to find a match
         $allModels = $this->getActiveRecordModels();
         foreach ($allModels as $className) {
             $parts = explode('\\', $className);
@@ -345,8 +373,10 @@ abstract class BaseTool extends Component
             }
         }
 
-        throw new \Exception(
-            "Model '$model' not found. Provide a full class name or ensure the model exists in @app/models."
-        );
+        $hint = $this->isAdvancedApp
+            ? "Provide a full class name or ensure the model exists in common/models/, backend/models/, or frontend/models/."
+            : "Provide a full class name or ensure the model exists in @app/models.";
+
+        throw new \Exception("Model '$model' not found. $hint");
     }
 }

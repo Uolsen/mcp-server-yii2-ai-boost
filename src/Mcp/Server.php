@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Mcp;
 
+use codechap\yii2boost\Helpers\ProjectRootResolver;
 use Yii;
 use yii\base\Component;
 use yii\base\Exception;
@@ -22,9 +23,19 @@ class Server extends Component
     public const VERSION = '1.3.0';
 
     /**
-     * @var string Base path to the Yii2 application
+     * @var string Base path to the Yii2 application (@app)
      */
     public $basePath;
+
+    /**
+     * @var string|null Project root path (resolved automatically if not set)
+     */
+    public $projectRoot;
+
+    /**
+     * @var bool Whether this is an advanced Yii2 application
+     */
+    public $isAdvancedApp = false;
 
     /**
      * @var string Transport type ('stdio' or 'http')
@@ -56,6 +67,12 @@ class Server extends Component
     {
         parent::init();
 
+        // Auto-resolve project root if not explicitly set
+        if ($this->projectRoot === null) {
+            $this->projectRoot = ProjectRootResolver::resolve();
+        }
+        $this->isAdvancedApp = ProjectRootResolver::isAdvancedApp($this->basePath);
+
         // Initialize log file
         $this->logFile = Yii::getAlias('@runtime/logs/mcp-requests.log');
         $logDir = dirname($this->logFile);
@@ -65,6 +82,8 @@ class Server extends Component
 
         $this->log("=== MCP Server Initialization Started ===");
         $this->log("Base path: {$this->basePath}");
+        $this->log("Project root: {$this->projectRoot}");
+        $this->log("Advanced app: " . ($this->isAdvancedApp ? 'yes' : 'no'));
         $this->log("Transport: {$this->transport}");
 
         // Initialize all tools
@@ -389,7 +408,11 @@ class Server extends Component
 
         foreach ($toolClasses as $class) {
             try {
-                $tool = new $class(['basePath' => $this->basePath]);
+                $tool = new $class([
+                    'basePath' => $this->basePath,
+                    'projectRoot' => $this->projectRoot,
+                    'isAdvancedApp' => $this->isAdvancedApp,
+                ]);
                 $this->tools[$tool->getName()] = $tool;
                 $this->log("  ✓ Registered tool: " . $tool->getName());
             } catch (\Exception $e) {

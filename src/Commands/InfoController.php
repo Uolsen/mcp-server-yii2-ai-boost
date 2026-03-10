@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Helpers\ProjectRootResolver;
 use codechap\yii2boost\Mcp\Search\SearchIndexManager;
 use Yii;
 use yii\console\Controller;
@@ -65,7 +66,7 @@ class InfoController extends Controller
      */
     private function displayConfigStatus(): void
     {
-        $basePath = Yii::getAlias('@app');
+        $basePath = ProjectRootResolver::resolve();
 
         $this->stdout("Configuration Status\n", 33);
         $this->stdout("─────────────────────────────────────────\n", 33);
@@ -97,6 +98,7 @@ class InfoController extends Controller
 
         $server = new \codechap\yii2boost\Mcp\Server([
             'basePath' => Yii::$app->getBasePath(),
+            'projectRoot' => ProjectRootResolver::resolve(),
         ]);
         $tools = $server->getTools();
 
@@ -113,7 +115,7 @@ class InfoController extends Controller
      */
     private function displayGuidelines(): void
     {
-        $basePath = Yii::getAlias('@app');
+        $basePath = ProjectRootResolver::resolve();
         $guidelinesPath = $basePath . '/.ai/guidelines';
 
         $this->stdout("Guidelines\n", 33);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Helpers\ProjectRootResolver;
 use yii\console\Controller;
 use yii\console\ExitCode;
 use yii\helpers\FileHelper;
@@ -31,9 +32,10 @@ class SyncRulesController extends Controller
     public function init(): void
     {
         parent::init();
-        $this->guidelinesPath = \Yii::getAlias('@app/.ai/guidelines');
-        $this->cursorRulesPath = \Yii::getAlias('@app/.cursor/rules');
-        $this->zedRulesPath = \Yii::getAlias('@app/.rules');
+        $root = ProjectRootResolver::resolve();
+        $this->guidelinesPath = $root . '/.ai/guidelines';
+        $this->cursorRulesPath = $root . '/.cursor/rules';
+        $this->zedRulesPath = $root . '/.rules';
     }
 
     /**

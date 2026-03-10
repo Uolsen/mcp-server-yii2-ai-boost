@@ -394,7 +394,9 @@ final class WidgetInspectorTool extends BaseTool
     }
 
     /**
-     * Discover widgets in @app/widgets, @app/components, and module directories
+     * Discover widgets in @app/widgets, @app/components, and module directories.
+     *
+     * For advanced apps, also scans common/widgets/, backend/widgets/, etc.
      *
      * @return array
      */
@@ -408,6 +410,19 @@ final class WidgetInspectorTool extends BaseTool
             $path = Yii::getAlias($alias, false);
             if ($path !== false && is_dir($path)) {
                 $widgets = array_merge($widgets, $this->scanDirectoryForWidgets($path));
+            }
+        }
+
+        // For advanced apps, scan widgets/components in all application directories
+        if ($this->isAdvancedApp && $this->projectRoot) {
+            $appNames = ['common', 'backend', 'frontend', 'api'];
+            foreach ($appNames as $appName) {
+                foreach (['widgets', 'components'] as $subdir) {
+                    $path = $this->projectRoot . '/' . $appName . '/' . $subdir;
+                    if (is_dir($path)) {
+                        $widgets = array_merge($widgets, $this->scanDirectoryForWidgets($path));
+                    }
+                }
             }
         }
 

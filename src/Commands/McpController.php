@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Helpers\ProjectRootResolver;
 use Yii;
 use yii\console\Controller;
 use yii\console\ExitCode;
@@ -60,9 +61,13 @@ class McpController extends Controller
             $envLine = "  Environment: YII_ENV=" . YII_ENV . ", YII_DEBUG=" . $debugVal . "\n";
             file_put_contents($logFile, $envLine, FILE_APPEND);
 
+            // Resolve project root for advanced app support
+            $projectRoot = ProjectRootResolver::resolve();
+
             // Create and start the MCP server
             $server = new Server([
                 'basePath' => Yii::getAlias('@app'),
+                'projectRoot' => $projectRoot,
                 'transport' => 'stdio',
             ]);
 

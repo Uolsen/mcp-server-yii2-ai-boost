@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Helpers\ProjectRootResolver;
 use codechap\yii2boost\Mcp\Search\MarkdownSectionParser;
 use codechap\yii2boost\Mcp\Search\SearchIndexManager;
 use Yii;
@@ -72,11 +73,15 @@ class InstallController extends Controller
     private function detectEnvironment(): array
     {
         $app = Yii::$app;
+        $projectRoot = ProjectRootResolver::resolve();
+        $isAdvancedApp = ProjectRootResolver::isAdvancedApp();
 
         return [
             'yii_version' => Yii::getVersion(),
             'php_version' => phpversion(),
             'app_base_path' => $app->getBasePath(),
+            'project_root' => $projectRoot,
+            'is_advanced_app' => $isAdvancedApp,
             'runtime_path' => Yii::getAlias('@runtime'),
             'yii_env' => YII_ENV,
             'yii_debug' => YII_DEBUG,
@@ -94,6 +99,11 @@ class InstallController extends Controller
         $this->stdout("  ✓ PHP version: {$envInfo['php_version']}\n", 32);
         $this->stdout("  ✓ Environment: {$envInfo['yii_env']}\n", 32);
         $this->stdout("  ✓ Debug mode: " . ($envInfo['yii_debug'] ? 'ON' : 'OFF') . "\n", 32);
+        $appType = $envInfo['is_advanced_app'] ? 'Advanced' : 'Basic';
+        $this->stdout("  ✓ App structure: {$appType}\n", 32);
+        if ($envInfo['is_advanced_app']) {
+            $this->stdout("  ✓ Project root: {$envInfo['project_root']}\n", 32);
+        }
     }
 
     /**
@@ -103,7 +113,7 @@ class InstallController extends Controller
      */
     private function createDirectories(): void
     {
-        $basePath = Yii::getAlias('@app');
+        $basePath = ProjectRootResolver::resolve();
 
         $directories = [
             $basePath . '/.ai',
@@ -137,11 +147,11 @@ class InstallController extends Controller
      */
     private function generateConfigFiles(array $envInfo): void
     {
-        $basePath = Yii::getAlias('@app');
+        $basePath = ProjectRootResolver::resolve();
 
         // Generate .mcp.json with absolute paths for maximum compatibility with MCP clients
         $phpPath = PHP_BINARY;
-        $yiiPath = $basePath . '/yii';
+        $yiiPath = ProjectRootResolver::getYiiScriptPath($basePath) ?? $basePath . '/yii';
 
         $mcpConfig = [
             'mcpServers' => [
@@ -235,7 +245,7 @@ class InstallController extends Controller
      */
     private function setGuidelines(): void
     {
-        $appBasePath = Yii::getAlias('@app');
+        $appBasePath = ProjectRootResolver::resolve();
         $targetPath = $appBasePath . '/.ai/guidelines';
 
         // Determine package root (vendor/codechap/yii2-ai-boost)
@@ -283,7 +293,7 @@ class InstallController extends Controller
             return;
         }
 
-        $appPath = Yii::getAlias('@app');
+        $appPath = ProjectRootResolver::resolve();
         $guidelinesPath = $appPath . '/.ai/guidelines';
 
         if (!is_dir($guidelinesPath)) {

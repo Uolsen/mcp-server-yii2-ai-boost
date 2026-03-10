@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Helpers\ProjectRootResolver;
 use codechap\yii2boost\Mcp\Search\GitHubGuideDownloader;
 use codechap\yii2boost\Mcp\Search\MarkdownSectionParser;
 use codechap\yii2boost\Mcp\Search\SearchIndexManager;
@@ -62,7 +63,7 @@ class UpdateController extends Controller
      */
     private function updateGuidelines(): void
     {
-        $appPath = Yii::getAlias('@app');
+        $appPath = ProjectRootResolver::resolve();
         $targetPath = $appPath . '/.ai/guidelines';
 
         // Locate source directory relative to this file
@@ -93,7 +94,7 @@ class UpdateController extends Controller
      */
     private function fetchYii2Guide(): void
     {
-        $appPath = Yii::getAlias('@app');
+        $appPath = ProjectRootResolver::resolve();
         $cachePath = $appPath . '/.ai/yii2-guide';
 
         $downloader = new GitHubGuideDownloader($cachePath);
@@ -133,7 +134,7 @@ class UpdateController extends Controller
             return;
         }
 
-        $appPath = Yii::getAlias('@app');
+        $appPath = ProjectRootResolver::resolve();
         $dbPath = Yii::getAlias('@runtime') . '/boost/search.db';
 
         $manager = new SearchIndexManager($dbPath);
@@ -208,7 +209,7 @@ class UpdateController extends Controller
      */
     private function verifyInstallation(): void
     {
-        $basePath = Yii::getAlias('@app');
+        $basePath = ProjectRootResolver::resolve();
 
         $files = [
             '.mcp.json',

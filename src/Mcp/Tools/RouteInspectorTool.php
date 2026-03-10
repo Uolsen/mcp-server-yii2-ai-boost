@@ -219,17 +219,38 @@ final class RouteInspectorTool extends BaseTool
     private function getWebConfigUrlRules(): array
     {
         $basePath = $this->basePath;
+        $projectRoot = $this->projectRoot ?: $basePath;
 
         // Common web config file locations for Yii2 applications
         $candidates = [
+            // Basic app config locations
             $basePath . '/config/web.php',
             $basePath . '/config/main.php',
             $basePath . '/config/main-local.php',
-            $basePath . '/../common/config/main.php',
-            $basePath . '/../common/config/main-local.php',
-            $basePath . '/../frontend/config/main.php',
-            $basePath . '/../backend/config/main.php',
         ];
+
+        if ($this->isAdvancedApp) {
+            // Advanced app: scan from project root
+            $candidates = array_merge($candidates, [
+                $projectRoot . '/common/config/main.php',
+                $projectRoot . '/common/config/main-local.php',
+                $projectRoot . '/common/config/routes.php',
+                $projectRoot . '/frontend/config/main.php',
+                $projectRoot . '/frontend/config/main-local.php',
+                $projectRoot . '/backend/config/main.php',
+                $projectRoot . '/backend/config/main-local.php',
+                $projectRoot . '/api/config/main.php',
+                $projectRoot . '/api/config/main-local.php',
+            ]);
+        } else {
+            // Basic app: try relative paths
+            $candidates = array_merge($candidates, [
+                $basePath . '/../common/config/main.php',
+                $basePath . '/../common/config/main-local.php',
+                $basePath . '/../frontend/config/main.php',
+                $basePath . '/../backend/config/main.php',
+            ]);
+        }
 
         $allRules = [];
 

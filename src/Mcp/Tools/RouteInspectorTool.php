@@ -143,8 +143,16 @@ final class RouteInspectorTool extends BaseTool
         }
 
         // Get routes for all modules
-        foreach ($app->getModules() as $id => $module) {
-            $result[$id] = $this->scanModuleControllers($module, $id);
+        foreach ($app->getModules() as $id => $moduleConfig) {
+            try {
+                $module = $app->getModule($id);
+                if ($module === null) {
+                    continue;
+                }
+                $result[$id] = $this->scanModuleControllers($module, $id);
+            } catch (\Throwable $e) {
+                $result[$id] = ['error' => $e->getMessage()];
+            }
         }
 
         return $result;

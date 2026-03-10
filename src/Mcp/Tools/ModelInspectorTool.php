@@ -237,6 +237,7 @@ final class ModelInspectorTool extends BaseTool
     private function getRelations(object $instance): array
     {
         $relations = [];
+        $warnings = [];
 
         $reflection = new \ReflectionClass($instance);
 
@@ -254,6 +255,12 @@ final class ModelInspectorTool extends BaseTool
             // Skip methods declared in framework classes
             $declaringClass = $method->getDeclaringClass()->getName();
             if (strpos($declaringClass, 'yii\\') === 0) {
+                continue;
+            }
+
+            // Pre-filter using return type hints to avoid calling non-relation getters
+            // that may have side-effects or crash in CLI context
+            if ($this->canSkipByReturnType($method)) {
                 continue;
             }
 
@@ -288,12 +295,75 @@ final class ModelInspectorTool extends BaseTool
                 }
 
                 $relations[$relationName] = $relation;
-            } catch (\Exception $e) {
-                // Method threw an exception — skip it
+            } catch (\Throwable $e) {
+                // Collect per-relation failures for diagnostics
+                $relationName = lcfirst(substr($methodName, 3));
+                $warnings[] = "$relationName: " . $e->getMessage();
             }
         }
 
+        // Attach warnings to the result if any relations failed
+        if (!empty($warnings)) {
+            $relations['_warnings'] = $warnings;
+        }
+
         return $relations;
+    }
+
+    /**
+     * Check if a getter method can be safely skipped based on its return type hint.
+     *
+     * If the method declares a return type that is clearly not an ActiveQuery
+     * (e.g., string, int, bool, array, void, specific non-query classes),
+     * we can skip calling it entirely. This prevents triggering side-effects
+     * in non-relation getters that crash in CLI/MCP context.
+     *
+     * @param \ReflectionMethod $method
+     * @return bool True if the method can be safely skipped
+     */
+    private function canSkipByReturnType(\ReflectionMethod $method): bool
+    {
+        $returnType = $method->getReturnType();
+
+        if ($returnType === null) {
+            // No return type declared — we must call it to check
+            return false;
+        }
+
+        // For union/intersection types, we can't easily determine — call the method
+        if ($returnType instanceof \ReflectionUnionType || $returnType instanceof \ReflectionIntersectionType) {
+            return false;
+        }
+
+        if (!($returnType instanceof \ReflectionNamedType)) {
+            return false;
+        }
+
+        $typeName = $returnType->getName();
+
+        // Built-in types that are never ActiveQuery
+        $nonQueryTypes = ['string', 'int', 'float', 'bool', 'array', 'void', 'never', 'null', 'false', 'true', 'mixed'];
+        if ($returnType->isBuiltin() || in_array($typeName, $nonQueryTypes, true)) {
+            return true;
+        }
+
+        // If the return type is a known class, check if it could be an ActiveQuery
+        try {
+            if (class_exists($typeName) || interface_exists($typeName)) {
+                // If the declared return type is not related to ActiveQuery at all, skip
+                if (
+                    !is_a($typeName, \yii\db\ActiveQueryInterface::class, true) &&
+                    !is_a($typeName, \yii\db\ActiveQuery::class, true)
+                ) {
+                    return true;
+                }
+            }
+        } catch (\Throwable $e) {
+            // class_exists triggered autoload error — skip this method to be safe
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -308,49 +378,56 @@ final class ModelInspectorTool extends BaseTool
 
         try {
             $attachedBehaviors = $instance->getBehaviors();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return $behaviors;
         }
 
         foreach ($attachedBehaviors as $name => $behavior) {
-            $behaviorInfo = [
-                'class' => get_class($behavior),
-            ];
-
-            // Get public properties specific to this behavior
             try {
-                $reflection = new \ReflectionClass($behavior);
-                $props = [];
-                foreach ($reflection->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
-                    if ($property->isStatic()) {
-                        continue;
-                    }
-                    // Skip properties inherited from base Behavior class
-                    if ($property->getDeclaringClass()->getName() === 'yii\\base\\Behavior') {
-                        continue;
-                    }
-                    $propName = $property->getName();
-                    try {
-                        $value = $property->getValue($behavior);
-                        if (is_object($value)) {
-                            $props[$propName] = get_class($value);
-                        } elseif (is_array($value)) {
-                            $props[$propName] = $value;
-                        } else {
-                            $props[$propName] = $value;
-                        }
-                    } catch (\Exception $e) {
-                        $props[$propName] = '[unable to read]';
-                    }
-                }
-                if (!empty($props)) {
-                    $behaviorInfo['properties'] = $this->sanitize($props);
-                }
-            } catch (\Exception $e) {
-                // Cannot reflect behavior
-            }
+                $behaviorInfo = [
+                    'class' => get_class($behavior),
+                ];
 
-            $behaviors[$name] = $behaviorInfo;
+                // Get public properties specific to this behavior
+                try {
+                    $reflection = new \ReflectionClass($behavior);
+                    $props = [];
+                    foreach ($reflection->getProperties(\ReflectionProperty::IS_PUBLIC) as $property) {
+                        if ($property->isStatic()) {
+                            continue;
+                        }
+                        // Skip properties inherited from base Behavior class
+                        if ($property->getDeclaringClass()->getName() === 'yii\\base\\Behavior') {
+                            continue;
+                        }
+                        $propName = $property->getName();
+                        try {
+                            $value = $property->getValue($behavior);
+                            if (is_object($value)) {
+                                $props[$propName] = get_class($value);
+                            } elseif (is_array($value)) {
+                                $props[$propName] = $value;
+                            } else {
+                                $props[$propName] = $value;
+                            }
+                        } catch (\Throwable $e) {
+                            $props[$propName] = '[unable to read]';
+                        }
+                    }
+                    if (!empty($props)) {
+                        $behaviorInfo['properties'] = $this->sanitize($props);
+                    }
+                } catch (\Throwable $e) {
+                    // Cannot reflect behavior
+                }
+
+                $behaviors[$name] = $behaviorInfo;
+            } catch (\Throwable $e) {
+                $behaviors[$name] = [
+                    'class' => 'unknown',
+                    'error' => $e->getMessage(),
+                ];
+            }
         }
 
         return $behaviors;

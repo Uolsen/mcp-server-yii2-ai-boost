@@ -153,12 +153,35 @@ final class ConfigAccessTool extends BaseTool
         $modules = [];
 
         foreach ($app->getModules() as $id => $module) {
-            $modules[$id] = [
-                'id' => $id,
-                'class' => get_class($module),
-                'basePath' => $module->basePath ?? null,
-                'layout' => $module->layout ?? null,
-            ];
+            try {
+                if (is_object($module)) {
+                    $modules[$id] = [
+                        'id' => $id,
+                        'class' => get_class($module),
+                        'basePath' => $module->basePath ?? null,
+                        'layout' => $module->layout ?? null,
+                    ];
+                } elseif (is_array($module)) {
+                    $modules[$id] = [
+                        'id' => $id,
+                        'class' => $module['class'] ?? 'unknown',
+                        'basePath' => null,
+                        'layout' => null,
+                        'loaded' => false,
+                    ];
+                } elseif (is_string($module)) {
+                    $modules[$id] = [
+                        'id' => $id,
+                        'class' => $module,
+                        'loaded' => false,
+                    ];
+                }
+            } catch (\Throwable $e) {
+                $modules[$id] = [
+                    'id' => $id,
+                    'error' => $e->getMessage(),
+                ];
+            }
         }
 
         return $modules;

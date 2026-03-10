@@ -259,9 +259,14 @@ abstract class BaseTool extends Component
 
             foreach ($iterator as $file) {
                 if ($file->isFile() && $file->getExtension() === 'php') {
-                    $className = $this->getClassNameFromFile($file->getPathname());
-                    if ($className && !in_array($className, $models, true) && $this->isActiveRecordModel($className)) {
-                        $models[] = $className;
+                    try {
+                        $className = $this->getClassNameFromFile($file->getPathname());
+                        if ($className && !in_array($className, $models, true) && $this->isActiveRecordModel($className)) {
+                            $models[] = $className;
+                        }
+                    } catch (\Throwable $e) {
+                        // Skip files that can't be parsed or whose classes can't be loaded
+                        continue;
                     }
                 }
             }
@@ -338,7 +343,8 @@ abstract class BaseTool extends Component
             }
 
             return false;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
+            // Catch all errors including autoload failures, parse errors, etc.
             return false;
         }
     }
@@ -354,8 +360,18 @@ abstract class BaseTool extends Component
     {
         // If it contains a backslash, treat as FQCN
         if (strpos($model, '\\') !== false) {
-            if (!class_exists($model)) {
-                throw new \Exception("Model class '$model' not found");
+            try {
+                $exists = class_exists($model);
+            } catch (\Throwable $e) {
+                throw new \Exception(
+                    "Model class '$model' could not be loaded: " . $e->getMessage()
+                    . ". The class may not be autoloadable from the console application context."
+                );
+            }
+            if (!$exists) {
+                throw new \Exception(
+                    "Model class '$model' not found. Ensure the class exists and is autoloadable."
+                );
             }
             if (!$this->isActiveRecordModel($model)) {
                 throw new \Exception("Class '$model' is not an ActiveRecord model");

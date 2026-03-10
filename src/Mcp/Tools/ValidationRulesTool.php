@@ -86,27 +86,52 @@ final class ValidationRulesTool extends BaseTool
 
         $result = [
             'class' => $className,
-            'table' => $className::tableName(),
         ];
+
+        try {
+            $result['table'] = $className::tableName();
+        } catch (\Throwable $e) {
+            $result['table'] = null;
+        }
 
         if ($scenario !== null) {
             $result['scenario'] = $scenario;
         }
 
         if (in_array('rules', $include)) {
-            $result['rules'] = $this->getRules($instance, $scenario);
+            try {
+                $result['rules'] = $this->getRules($instance, $scenario);
+            } catch (\Throwable $e) {
+                $result['rules'] = [];
+                $result['_warnings'][] = 'Could not parse rules: ' . $e->getMessage();
+            }
         }
 
         if (in_array('messages', $include)) {
-            $result['messages'] = $this->getMessages($instance, $scenario);
+            try {
+                $result['messages'] = $this->getMessages($instance, $scenario);
+            } catch (\Throwable $e) {
+                $result['messages'] = [];
+                $result['_warnings'][] = 'Could not extract messages (may require DB): ' . $e->getMessage();
+            }
         }
 
         if (in_array('constraints', $include)) {
-            $result['constraints'] = $this->getConstraints($instance, $scenario);
+            try {
+                $result['constraints'] = $this->getConstraints($instance, $scenario);
+            } catch (\Throwable $e) {
+                $result['constraints'] = [];
+                $result['_warnings'][] = 'Could not extract constraints (may require DB): ' . $e->getMessage();
+            }
         }
 
         if (in_array('safe_attributes', $include)) {
-            $result['safe_attributes'] = $this->getSafeAttributes($instance, $scenario);
+            try {
+                $result['safe_attributes'] = $this->getSafeAttributes($instance, $scenario);
+            } catch (\Throwable $e) {
+                $result['safe_attributes'] = [];
+                $result['_warnings'][] = 'Could not determine safe attributes: ' . $e->getMessage();
+            }
         }
 
         return $result;
@@ -221,7 +246,7 @@ final class ValidationRulesTool extends BaseTool
 
         try {
             $validators = $instance->getActiveValidators();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return $messages;
         }
 
@@ -270,7 +295,7 @@ final class ValidationRulesTool extends BaseTool
 
         try {
             $validators = $instance->getActiveValidators();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return $constraints;
         }
 

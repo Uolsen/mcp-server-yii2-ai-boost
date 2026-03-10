@@ -67,10 +67,23 @@ final class DatabaseSchemaTool extends BaseTool
             throw new \Exception("Database connection '$dbName' not found");
         }
 
-        $db = Yii::$app->get($dbName);
         $result = [
             'connection' => $this->getDbConnectionInfo($dbName),
         ];
+
+        // Try to get the actual DB connection - it may fail if DB is unreachable
+        $db = null;
+        try {
+            $db = Yii::$app->get($dbName);
+            $db->open();
+        } catch (\Throwable $e) {
+            $result['error'] = 'Database connection failed: ' . $e->getMessage();
+            // Still return models (no DB needed) if requested
+            if (in_array('models', $include)) {
+                $result['models'] = $this->getActiveRecordModels();
+            }
+            return $result;
+        }
 
         if (in_array('tables', $include)) {
             $result['tables'] = $this->getTables($db, $table);

@@ -63,34 +63,66 @@ final class ModelInspectorTool extends BaseTool
 
         try {
             $instance = new $className();
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             throw new \Exception("Cannot instantiate model '$className': " . $e->getMessage());
         }
 
         $result = [
             'class' => $className,
             'table' => $className::tableName(),
-            'primary_key' => $className::primaryKey(),
         ];
 
+        try {
+            $result['primary_key'] = $className::primaryKey();
+        } catch (\Throwable $e) {
+            // primaryKey() may require DB on some drivers
+            $result['primary_key'] = null;
+            $result['_warnings'][] = 'Could not determine primary key: ' . $e->getMessage();
+        }
+
         if (in_array('attributes', $include)) {
-            $result['attributes'] = $this->getAttributes($instance);
+            try {
+                $result['attributes'] = $this->getAttributes($instance);
+            } catch (\Throwable $e) {
+                $result['attributes'] = $this->getAttributesFallback($instance);
+                $result['_warnings'][] = 'Attributes loaded without DB schema: ' . $e->getMessage();
+            }
         }
 
         if (in_array('relations', $include)) {
-            $result['relations'] = $this->getRelations($instance);
+            try {
+                $result['relations'] = $this->getRelations($instance);
+            } catch (\Throwable $e) {
+                $result['relations'] = [];
+                $result['_warnings'][] = 'Could not inspect relations: ' . $e->getMessage();
+            }
         }
 
         if (in_array('behaviors', $include)) {
-            $result['behaviors'] = $this->inspectBehaviors($instance);
+            try {
+                $result['behaviors'] = $this->inspectBehaviors($instance);
+            } catch (\Throwable $e) {
+                $result['behaviors'] = [];
+                $result['_warnings'][] = 'Could not inspect behaviors: ' . $e->getMessage();
+            }
         }
 
         if (in_array('scenarios', $include)) {
-            $result['scenarios'] = $this->getScenarios($instance);
+            try {
+                $result['scenarios'] = $this->getScenarios($instance);
+            } catch (\Throwable $e) {
+                $result['scenarios'] = [];
+                $result['_warnings'][] = 'Could not inspect scenarios: ' . $e->getMessage();
+            }
         }
 
         if (in_array('fields', $include)) {
-            $result['fields'] = $this->getFields($instance);
+            try {
+                $result['fields'] = $this->getFields($instance);
+            } catch (\Throwable $e) {
+                $result['fields'] = [];
+                $result['_warnings'][] = 'Could not inspect fields: ' . $e->getMessage();
+            }
         }
 
         return $result;
@@ -136,6 +168,61 @@ final class ModelInspectorTool extends BaseTool
             }
 
             $result[$name] = $attr;
+        }
+
+        return $result;
+    }
+
+    /**
+     * Fallback attribute extraction when DB is unavailable.
+     * Uses rules(), attributeLabels() and attributeHints() which don't require DB.
+     *
+     * @param object $instance Model instance
+     * @return array
+     */
+    private function getAttributesFallback(object $instance): array
+    {
+        $result = [];
+
+        // Extract attribute names from rules() — this never touches the DB
+        $attributeNames = [];
+        try {
+            $rules = $instance->rules();
+            foreach ($rules as $rule) {
+                if (is_array($rule) && isset($rule[0])) {
+                    $attrs = (array) $rule[0];
+                    foreach ($attrs as $attr) {
+                        $attributeNames[$attr] = true;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {
+            // rules() should not fail, but be safe
+        }
+
+        $labels = [];
+        try {
+            $labels = $instance->attributeLabels();
+        } catch (\Throwable $e) {
+        }
+
+        // Merge attribute names from labels too
+        foreach (array_keys($labels) as $attr) {
+            $attributeNames[$attr] = true;
+        }
+
+        $hints = [];
+        try {
+            $hints = $instance->attributeHints();
+        } catch (\Throwable $e) {
+        }
+
+        foreach (array_keys($attributeNames) as $name) {
+            $result[$name] = [
+                'label' => $labels[$name] ?? null,
+                'hint' => $hints[$name] ?? null,
+                'source' => 'rules/labels (no DB connection)',
+            ];
         }
 
         return $result;

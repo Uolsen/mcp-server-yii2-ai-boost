@@ -128,10 +128,25 @@ final class ApplicationInfoTool extends BaseTool
         $app = Yii::$app;
 
         foreach ($app->getModules() as $id => $module) {
-            $modules[$id] = [
-                'class' => get_class($module),
-                'basePath' => $module->basePath ?? null,
-            ];
+            if (is_object($module)) {
+                $modules[$id] = [
+                    'class' => get_class($module),
+                    'basePath' => $module->basePath ?? null,
+                ];
+            } elseif (is_array($module)) {
+                // Module not yet instantiated (lazy-loaded config)
+                $modules[$id] = [
+                    'class' => $module['class'] ?? 'unknown',
+                    'basePath' => $module['basePath'] ?? null,
+                    'loaded' => false,
+                ];
+            } elseif (is_string($module)) {
+                // Module defined as class name string
+                $modules[$id] = [
+                    'class' => $module,
+                    'loaded' => false,
+                ];
+            }
         }
 
         return $modules;

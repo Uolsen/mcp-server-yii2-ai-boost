@@ -86,7 +86,13 @@ final class RouteInspectorTool extends BaseTool
             return [];
         }
 
-        $urlManager = $app->get('urlManager');
+        try {
+            $urlManager = $app->get('urlManager');
+        } catch (\Throwable $e) {
+            // urlManager init may fail (e.g. Redis cache unavailable in console context)
+            return [];
+        }
+
         $rules = [];
 
         foreach ($urlManager->rules as $rule) {
@@ -132,14 +138,38 @@ final class RouteInspectorTool extends BaseTool
 
         if ($moduleName) {
             if (!$app->hasModule($moduleName)) {
-                throw new \Exception("Module '$moduleName' not found");
+                // For advanced apps, the module may exist in another app (backend, api, etc.)
+                // Try to find it by scanning config files
+                if ($this->isAdvancedApp && $this->projectRoot) {
+                    $configRoutes = $this->getWebConfigUrlRules();
+                    $moduleRoutes = array_filter($configRoutes, function ($rule) use ($moduleName) {
+                        $route = $rule['route'] ?? $rule['pattern'] ?? '';
+                        return strpos($route, $moduleName . '/') === 0
+                            || strpos($route, $moduleName) === 0;
+                    });
+                    if (!empty($moduleRoutes)) {
+                        return [
+                            'module' => $moduleName,
+                            'routes' => array_values($moduleRoutes),
+                            'source' => 'parsed from config (module not loaded in console context)',
+                        ];
+                    }
+                }
+                throw new \Exception("Module '$moduleName' not found. In advanced apps, modules from other apps (backend, api, frontend) are not loaded in console context.");
             }
 
-            $module = $app->getModule($moduleName);
-            return [
-                'module' => $moduleName,
-                'routes' => $this->scanModuleControllers($module, $moduleName),
-            ];
+            try {
+                $module = $app->getModule($moduleName);
+                return [
+                    'module' => $moduleName,
+                    'routes' => $this->scanModuleControllers($module, $moduleName),
+                ];
+            } catch (\Throwable $e) {
+                return [
+                    'module' => $moduleName,
+                    'error' => $e->getMessage(),
+                ];
+            }
         }
 
         // Get routes for all modules

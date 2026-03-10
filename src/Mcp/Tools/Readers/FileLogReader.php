@@ -42,7 +42,7 @@ final class FileLogReader implements LogReaderInterface
 
     public function isAvailable(): bool
     {
-        return $this->target !== null && $this->getLogFilePath() !== null;
+        return $this->getLogFilePath() !== null;
     }
 
     public function getSource(): string
@@ -168,36 +168,85 @@ final class FileLogReader implements LogReaderInterface
      */
     private function findFileTarget(): void
     {
-        if (!Yii::$app->has('log')) {
-            return;
-        }
-
-        $dispatcher = Yii::$app->get('log');
-        if (!isset($dispatcher->targets)) {
-            return;
-        }
-
-        foreach ($dispatcher->targets as $target) {
-            if ($target instanceof FileTarget && $target->enabled) {
-                $this->target = $target;
-                break;
+        try {
+            if (!Yii::$app->has('log')) {
+                return;
             }
+
+            $dispatcher = Yii::$app->get('log');
+            if (!isset($dispatcher->targets)) {
+                return;
+            }
+
+            foreach ($dispatcher->targets as $target) {
+                // Handle both direct instances and lazy config arrays
+                if (is_array($target)) {
+                    continue;
+                }
+                if ($target instanceof FileTarget && $target->enabled) {
+                    $this->target = $target;
+                    return;
+                }
+            }
+        } catch (\Throwable $e) {
+            // Log component may fail to initialize (e.g. Redis session dependency)
         }
     }
 
     /**
-     * Get the log file path
+     * Get the log file path with fallback discovery
      *
      * @return string|null
      */
     private function getLogFilePath(): ?string
     {
-        if ($this->target === null) {
-            return null;
+        // First try the configured FileTarget
+        if ($this->target !== null) {
+            try {
+                $logFile = Yii::getAlias($this->target->logFile);
+                if (file_exists($logFile)) {
+                    return $logFile;
+                }
+            } catch (\Throwable $e) {
+                // Alias resolution failed
+            }
         }
 
-        $logFile = Yii::getAlias($this->target->logFile);
-        return file_exists($logFile) ? $logFile : null;
+        // Fallback: scan common log file locations
+        $candidates = [];
+
+        try {
+            $runtime = Yii::getAlias('@runtime');
+            $candidates[] = $runtime . '/logs/app.log';
+        } catch (\Throwable $e) {
+        }
+
+        // For advanced apps, check multiple runtime directories
+        $appDirs = ['console', 'backend', 'frontend', 'api', 'common'];
+        try {
+            $root = Yii::getAlias('@root');
+            foreach ($appDirs as $dir) {
+                $candidates[] = $root . '/' . $dir . '/runtime/logs/app.log';
+            }
+        } catch (\Throwable $e) {
+            // @root alias not defined (basic app)
+        }
+
+        // Also try basePath parent for basic apps
+        try {
+            $basePath = Yii::getAlias('@app');
+            $candidates[] = $basePath . '/runtime/logs/app.log';
+        } catch (\Throwable $e) {
+        }
+
+        // Deduplicate and check which files exist
+        foreach (array_unique($candidates) as $candidate) {
+            if (file_exists($candidate)) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     /**

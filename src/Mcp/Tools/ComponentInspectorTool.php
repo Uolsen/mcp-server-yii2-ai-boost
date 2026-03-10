@@ -69,25 +69,56 @@ final class ComponentInspectorTool extends BaseTool
         $components = [];
 
         try {
-            foreach ($app->getComponents() as $id => $component) {
+            foreach ($app->getComponents() as $id => $componentDef) {
                 try {
-                    $components[$id] = $this->getComponentDetails($id, $includeConfig);
-                } catch (\Exception $e) {
-                    // Log error but continue processing other components
-                    $msg = "[ComponentInspector] Error getting details for component '$id': ";
-                    fwrite(STDERR, $msg . $e->getMessage() . "\n");
+                    $components[$id] = $this->getComponentSummary($id, $componentDef, $includeConfig);
+                } catch (\Throwable $e) {
                     $components[$id] = [
                         'id' => $id,
                         'error' => $e->getMessage(),
                     ];
                 }
             }
-        } catch (\Exception $e) {
-            fwrite(STDERR, "[ComponentInspector] Error listing components: " . $e->getMessage() . "\n");
+        } catch (\Throwable $e) {
             throw $e;
         }
 
         return ['components' => $components];
+    }
+
+    /**
+     * Get a summary of a component without forcing instantiation.
+     * Used in listing mode to avoid triggering infrastructure connections.
+     *
+     * @param string $id Component ID
+     * @param mixed $componentDef Component definition (config array, object, or string)
+     * @param bool $includeConfig Include configuration details
+     * @return array
+     */
+    private function getComponentSummary(string $id, mixed $componentDef, bool $includeConfig): array
+    {
+        $details = ['id' => $id];
+
+        if (is_object($componentDef)) {
+            // Already instantiated
+            $details['class'] = get_class($componentDef);
+            $details['is_loaded'] = true;
+        } elseif (is_array($componentDef)) {
+            $details['class'] = $componentDef['class'] ?? 'unknown';
+            $details['is_loaded'] = false;
+        } elseif (is_string($componentDef)) {
+            $details['class'] = $componentDef;
+            $details['is_loaded'] = false;
+        } else {
+            $details['class'] = 'unknown';
+            $details['is_loaded'] = false;
+        }
+
+        if ($includeConfig && is_array($componentDef)) {
+            $details['config'] = $this->sanitize($componentDef);
+        }
+
+        return $details;
     }
 
     /**
@@ -113,8 +144,8 @@ final class ComponentInspectorTool extends BaseTool
         $component = null;
         try {
             $component = $app->get($id);
-        } catch (\Exception $e) {
-            // Component couldn't be loaded
+        } catch (\Throwable $e) {
+            // Component couldn't be loaded (e.g. infrastructure dependency unavailable)
         }
 
         // Determine class name from component instance or definition

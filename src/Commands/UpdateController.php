@@ -36,20 +36,15 @@ class UpdateController extends Controller
         $this->stdout("└───────────────────────────────────────────┘\n\n", 32);
 
         try {
-            $this->stdout("[1/5] Updating Guidelines\n", 33);
-            $this->updateGuidelines();
-
-            $this->stdout("\n[2/5] Updating Skills\n", 33);
+            $this->stdout("[1/3] Updating Skills & CLAUDE.md\n", 33);
             $this->updateSkills();
-
-            $this->stdout("\n[3/5] Updating CLAUDE.md\n", 33);
             $this->updateClaudeMd();
 
-            $this->stdout("\n[4/5] Fetching Yii2 Guide & Building Search Index\n", 33);
+            $this->stdout("\n[2/3] Fetching Yii2 Guide & Building Search Index\n", 33);
             $this->fetchYii2Guide();
             $this->buildSearchIndex();
 
-            $this->stdout("\n[5/5] Verifying Installation\n", 33);
+            $this->stdout("\n[3/3] Verifying Installation\n", 33);
             $this->verifyInstallation();
 
             $this->stdout("\n", 0);
@@ -65,174 +60,94 @@ class UpdateController extends Controller
     }
 
     /**
-     * Update guidelines from package source to .ai/guidelines/
-     */
-    private function updateGuidelines(): void
-    {
-        $appPath = ProjectRootResolver::resolve();
-        $targetPath = $appPath . '/.ai/guidelines';
-        $packageRoot = dirname(__DIR__, 2);
-        $sourcePath = $packageRoot . '/.ai/guidelines';
-
-        if (!is_dir($sourcePath)) {
-            $this->stdout("  ! Package source guidelines not found at: $sourcePath\n", 33);
-            return;
-        }
-
-        if (!is_dir($targetPath)) {
-            FileHelper::createDirectory($targetPath);
-        }
-
-        try {
-            FileHelper::copyDirectory($sourcePath, $targetPath, [
-                'dirMode' => 0755,
-                'fileMode' => 0644,
-            ]);
-            $this->stdout("  ✓ Guidelines updated\n", 32);
-        } catch (\Exception $e) {
-            throw new \Exception("Failed to copy guidelines: " . $e->getMessage());
-        }
-    }
-
-    /**
-     * Update skills from package to .ai/skills/ and .claude/skills/
+     * Update skills in .claude/skills/ from vendor and project .ai/skills/
+     *
+     * Yii2-specific skills are read directly from the vendor package.
+     * Project-specific skills live in .ai/skills/ and are also synced.
      */
     private function updateSkills(): void
     {
         $appPath = ProjectRootResolver::resolve();
         $packageRoot = dirname(__DIR__, 2);
-        $sourcePath = $packageRoot . '/.ai/skills';
-        $aiSkillsPath = $appPath . '/.ai/skills';
+        $vendorSkillsPath = $packageRoot . '/.ai/skills';
+        $projectSkillsPath = $appPath . '/.ai/skills';
         $claudeSkillsPath = $appPath . '/.claude/skills';
 
-        if (!is_dir($sourcePath)) {
-            $this->stdout("  ! Package source skills not found at: $sourcePath\n", 33);
-            return;
+        // Ensure .claude/skills/ exists
+        if (!is_dir($claudeSkillsPath)) {
+            FileHelper::createDirectory($claudeSkillsPath);
         }
 
-        // Ensure directories exist
-        foreach ([$aiSkillsPath, $claudeSkillsPath] as $dir) {
-            if (!is_dir($dir)) {
-                FileHelper::createDirectory($dir);
-            }
-        }
+        // Collect valid skill names from vendor + project
+        $validSkillNames = [];
 
-        try {
-            // Copy to .ai/skills/ (source for search indexing)
-            FileHelper::copyDirectory($sourcePath, $aiSkillsPath, [
-                'dirMode' => 0755,
-                'fileMode' => 0644,
-            ]);
-
-            // Copy to .claude/skills/ (for agent skill activation)
-            FileHelper::copyDirectory($sourcePath, $claudeSkillsPath, [
-                'dirMode' => 0755,
-                'fileMode' => 0644,
-            ]);
-
-            $skillDirs = glob($claudeSkillsPath . '/*/SKILL.md');
-            $count = is_array($skillDirs) ? count($skillDirs) : 0;
-            $this->stdout("  ✓ Updated {$count} skills\n", 32);
-        } catch (\Exception $e) {
-            throw new \Exception("Failed to copy skills: " . $e->getMessage());
-        }
-
-        // Sync .claude/skills/ with .ai/skills/ (the combined source of truth)
-        // This preserves project-specific skills in .ai/skills/ that are not from the package
-        $this->syncClaudeSkills($aiSkillsPath, $claudeSkillsPath);
-
-        // Clean .ai/skills/ entries that exist neither in package nor as project-specific skills
-        $this->cleanStaleSkills($sourcePath, $aiSkillsPath);
-    }
-
-    /**
-     * Sync .claude/skills/ with .ai/skills/ (the combined source of truth).
-     *
-     * Copies project-specific skills from .ai/skills/ to .claude/skills/ and
-     * removes skills from .claude/skills/ that no longer exist in .ai/skills/.
-     *
-     * @param string $aiSkillsPath .ai/skills/ directory (combined: package + project)
-     * @param string $claudeSkillsPath .claude/skills/ directory
-     */
-    private function syncClaudeSkills(string $aiSkillsPath, string $claudeSkillsPath): void
-    {
-        if (!is_dir($aiSkillsPath) || !is_dir($claudeSkillsPath)) {
-            return;
-        }
-
-        $aiSkillNames = array_map('basename', glob($aiSkillsPath . '/*', GLOB_ONLYDIR) ?: []);
-
-        // Copy project-specific skills from .ai/skills/ to .claude/skills/
-        foreach ($aiSkillNames as $name) {
-            $aiDir = $aiSkillsPath . '/' . $name;
-            $claudeDir = $claudeSkillsPath . '/' . $name;
-            if (!is_dir($claudeDir) && is_dir($aiDir)) {
-                FileHelper::copyDirectory($aiDir, $claudeDir, [
+        // Copy vendor (Yii2) skills to .claude/skills/
+        if (is_dir($vendorSkillsPath)) {
+            try {
+                FileHelper::copyDirectory($vendorSkillsPath, $claudeSkillsPath, [
                     'dirMode' => 0755,
                     'fileMode' => 0644,
                 ]);
+                $vendorNames = array_map('basename', glob($vendorSkillsPath . '/*', GLOB_ONLYDIR) ?: []);
+                $validSkillNames = array_merge($validSkillNames, $vendorNames);
+            } catch (\Exception $e) {
+                throw new \Exception("Failed to copy vendor skills: " . $e->getMessage());
             }
         }
 
-        // Remove skills from .claude/skills/ that no longer exist in .ai/skills/
+        // Copy project-specific skills to .claude/skills/
+        if (is_dir($projectSkillsPath)) {
+            $projectSkillDirs = glob($projectSkillsPath . '/*', GLOB_ONLYDIR) ?: [];
+            foreach ($projectSkillDirs as $skillDir) {
+                $name = basename($skillDir);
+                $validSkillNames[] = $name;
+                $targetDir = $claudeSkillsPath . '/' . $name;
+                try {
+                    FileHelper::copyDirectory($skillDir, $targetDir, [
+                        'dirMode' => 0755,
+                        'fileMode' => 0644,
+                    ]);
+                } catch (\Exception $e) {
+                    $this->stderr("  ✗ Failed to copy project skill {$name}: " . $e->getMessage() . "\n", 31);
+                }
+            }
+        }
+
+        // Remove stale skills from .claude/skills/ that no longer exist in vendor or project
         $claudeSkills = glob($claudeSkillsPath . '/*', GLOB_ONLYDIR) ?: [];
         foreach ($claudeSkills as $claudeDir) {
             $name = basename($claudeDir);
-            if (!in_array($name, $aiSkillNames, true)) {
+            if (!in_array($name, $validSkillNames, true)) {
                 FileHelper::removeDirectory($claudeDir);
                 $this->stdout("  ✓ Removed stale skill: {$name}\n", 33);
             }
         }
-    }
 
-    /**
-     * Remove skill directories from target that no longer exist in source.
-     *
-     * Only removes skills that match the package prefix (yii2-*) to avoid
-     * deleting project-specific skills.
-     *
-     * @param string $sourcePath Package source skills directory
-     * @param string $targetPath Target skills directory
-     */
-    private function cleanStaleSkills(string $sourcePath, string $targetPath): void
-    {
-        if (!is_dir($targetPath)) {
-            return;
-        }
-
-        $sourceSkills = array_map('basename', glob($sourcePath . '/*', GLOB_ONLYDIR) ?: []);
-        $targetSkills = glob($targetPath . '/*', GLOB_ONLYDIR) ?: [];
-
-        foreach ($targetSkills as $targetDir) {
-            $name = basename($targetDir);
-            // Only clean package-managed skills (yii2-* prefix)
-            // Project-specific skills are not touched
-            if (strpos($name, 'yii2-') === 0 && !in_array($name, $sourceSkills, true)) {
-                FileHelper::removeDirectory($targetDir);
-                $this->stdout("  ✓ Removed stale package skill: {$name}\n", 33);
-            }
-        }
+        $skillDirs = glob($claudeSkillsPath . '/*/SKILL.md');
+        $count = is_array($skillDirs) ? count($skillDirs) : 0;
+        $this->stdout("  ✓ Updated {$count} skills in .claude/skills/\n", 32);
     }
 
     /**
      * Regenerate CLAUDE.md guidelines block (preserves user content)
      *
-     * Reads all .md files from .ai/guidelines/ (yii2-boost.md first, then
-     * project-specific files sorted alphabetically) and embeds them in the
-     * <yii2-boost-guidelines> block.
+     * Reads guidelines from the vendor package and embeds them in the
+     * <yii2-boost-guidelines> block. Skills are discovered from both
+     * vendor and project .ai/skills/.
      */
     private function updateClaudeMd(): void
     {
         $appPath = ProjectRootResolver::resolve();
-        $guidelinesPath = $appPath . '/.ai/guidelines';
+        $packageRoot = dirname(__DIR__, 2);
+        $vendorGuidelinesPath = $packageRoot . '/.ai/guidelines';
         $claudeMdPath = $appPath . '/CLAUDE.md';
 
-        if (!is_dir($guidelinesPath)) {
-            $this->stdout("  ! Guidelines directory not found, skipping CLAUDE.md\n", 33);
+        if (!is_dir($vendorGuidelinesPath)) {
+            $this->stdout("  ! Vendor guidelines not found, skipping CLAUDE.md\n", 33);
             return;
         }
 
-        $files = FileHelper::findFiles($guidelinesPath, [
+        $files = FileHelper::findFiles($vendorGuidelinesPath, [
             'only' => ['*.md'],
             'recursive' => false,
         ]);
@@ -271,8 +186,8 @@ class UpdateController extends Controller
 
         $guidelineContent = implode("\n\n---\n\n", $parts);
 
-        // Discover installed skills for the activation section
-        $skills = GuidelineWriter::discoverSkills($appPath . '/.ai/skills');
+        // Discover skills from vendor and project
+        $skills = $this->discoverAllSkills();
 
         if (GuidelineWriter::write($claudeMdPath, $guidelineContent, $skills)) {
             $this->stdout("  ✓ Updated CLAUDE.md guidelines block\n", 32);
@@ -282,6 +197,33 @@ class UpdateController extends Controller
         } else {
             $this->stdout("  ✓ CLAUDE.md already up-to-date\n", 32);
         }
+    }
+
+    /**
+     * Discover skills from both vendor package and project .ai/skills/.
+     *
+     * Project skills override vendor skills with the same name.
+     *
+     * @return array<array{name: string, description: string}>
+     */
+    private function discoverAllSkills(): array
+    {
+        $appPath = ProjectRootResolver::resolve();
+        $packageRoot = dirname(__DIR__, 2);
+
+        $vendorSkills = GuidelineWriter::discoverSkills($packageRoot . '/.ai/skills');
+        $projectSkills = GuidelineWriter::discoverSkills($appPath . '/.ai/skills');
+
+        // Merge: project skills override vendor skills by name
+        $merged = [];
+        foreach ($vendorSkills as $skill) {
+            $merged[$skill['name']] = $skill;
+        }
+        foreach ($projectSkills as $skill) {
+            $merged[$skill['name']] = $skill;
+        }
+
+        return array_values($merged);
     }
 
     /**
@@ -319,7 +261,7 @@ class UpdateController extends Controller
     }
 
     /**
-     * Build the FTS5 search index
+     * Build the FTS5 search index from vendor, project skills, and Yii2 guide
      */
     private function buildSearchIndex(): void
     {
@@ -329,6 +271,7 @@ class UpdateController extends Controller
         }
 
         $appPath = ProjectRootResolver::resolve();
+        $packageRoot = dirname(__DIR__, 2);
         $dbPath = Yii::getAlias('@runtime') . '/boost/search.db';
 
         $manager = new SearchIndexManager($dbPath);
@@ -338,16 +281,17 @@ class UpdateController extends Controller
         $parser = new MarkdownSectionParser();
         $totalSections = 0;
 
-        // Index guidelines
-        $guidelinesPath = $appPath . '/.ai/guidelines';
+        // Index guidelines from vendor
+        $guidelinesPath = $packageRoot . '/.ai/guidelines';
         if (is_dir($guidelinesPath)) {
             $files = FileHelper::findFiles($guidelinesPath, [
                 'only' => ['*.md'],
                 'recursive' => true,
             ]);
 
+            $guidelineSections = 0;
             foreach ($files as $file) {
-                $relativePath = str_replace($appPath . '/.ai/guidelines/', '', $file);
+                $relativePath = str_replace($guidelinesPath . '/', '', $file);
                 $content = file_get_contents($file);
                 $parsed = $parser->parse($content, $file);
 
@@ -358,44 +302,22 @@ class UpdateController extends Controller
                     $parsed['file_title'],
                     $parsed['sections']
                 );
-                $totalSections += $count;
+                $guidelineSections += $count;
             }
 
-            $this->stdout("  ✓ Indexed guidelines: {$totalSections} sections\n", 32);
+            $totalSections += $guidelineSections;
+            $this->stdout("  ✓ Indexed guidelines: {$guidelineSections} sections\n", 32);
         }
 
-        // Index skills
-        $skillsSections = 0;
-        $skillsPath = $appPath . '/.ai/skills';
-        if (is_dir($skillsPath)) {
-            $files = FileHelper::findFiles($skillsPath, [
-                'only' => ['*.md'],
-                'recursive' => true,
-            ]);
+        // Index skills from vendor
+        $vendorSkillSections = $this->indexSkillsFromPath($manager, $parser, $packageRoot . '/.ai/skills');
+        $totalSections += $vendorSkillSections;
 
-            foreach ($files as $file) {
-                $relativePath = str_replace($appPath . '/.ai/skills/', '', $file);
-                $skillName = dirname($relativePath);
-                $content = file_get_contents($file);
+        // Index project-specific skills
+        $projectSkillSections = $this->indexSkillsFromPath($manager, $parser, $appPath . '/.ai/skills');
+        $totalSections += $projectSkillSections;
 
-                // Strip YAML frontmatter before parsing
-                $content = $this->stripFrontmatter($content);
-
-                $parsed = $parser->parse($content, $file);
-
-                $count = $manager->indexSections(
-                    'bundled',
-                    'skills/' . $skillName,
-                    $relativePath,
-                    $parsed['file_title'],
-                    $parsed['sections']
-                );
-                $skillsSections += $count;
-            }
-
-            $totalSections += $skillsSections;
-            $this->stdout("  ✓ Indexed skills: {$skillsSections} sections\n", 32);
-        }
+        $this->stdout("  ✓ Indexed skills: " . ($vendorSkillSections + $projectSkillSections) . " sections\n", 32);
 
         // Index Yii2 guide (if cached)
         $guideSections = 0;
@@ -431,6 +353,52 @@ class UpdateController extends Controller
     }
 
     /**
+     * Index skills from a given directory path.
+     *
+     * @param SearchIndexManager $manager Search index manager
+     * @param MarkdownSectionParser $parser Markdown parser
+     * @param string $skillsPath Path to skills directory
+     * @return int Number of sections indexed
+     */
+    private function indexSkillsFromPath(
+        SearchIndexManager $manager,
+        MarkdownSectionParser $parser,
+        string $skillsPath
+    ): int {
+        if (!is_dir($skillsPath)) {
+            return 0;
+        }
+
+        $files = FileHelper::findFiles($skillsPath, [
+            'only' => ['*.md'],
+            'recursive' => true,
+        ]);
+
+        $totalSections = 0;
+        foreach ($files as $file) {
+            $relativePath = str_replace($skillsPath . '/', '', $file);
+            $skillName = dirname($relativePath);
+            $content = file_get_contents($file);
+
+            // Strip YAML frontmatter before parsing
+            $content = $this->stripFrontmatter($content);
+
+            $parsed = $parser->parse($content, $file);
+
+            $count = $manager->indexSections(
+                'bundled',
+                'skills/' . $skillName,
+                $relativePath,
+                $parsed['file_title'],
+                $parsed['sections']
+            );
+            $totalSections += $count;
+        }
+
+        return $totalSections;
+    }
+
+    /**
      * Strip YAML frontmatter from markdown content.
      *
      * @param string $content Markdown content
@@ -457,7 +425,6 @@ class UpdateController extends Controller
         $checks = [
             'CLAUDE.md' => file_exists($basePath . '/CLAUDE.md'),
             '.mcp.json' => file_exists($basePath . '/.mcp.json'),
-            '.ai/guidelines/' => is_dir($basePath . '/.ai/guidelines'),
             '.ai/skills/' => is_dir($basePath . '/.ai/skills'),
             '.claude/skills/' => is_dir($basePath . '/.claude/skills'),
         ];

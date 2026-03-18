@@ -38,29 +38,25 @@ class InstallController extends Controller
 
         try {
             // Step 1: Detect environment
-            $this->stdout("[1/6] Detecting Environment\n", 33);
+            $this->stdout("[1/5] Detecting Environment\n", 33);
             $envInfo = $this->detectEnvironment();
             $this->outputEnvironmentInfo($envInfo);
 
             // Step 2: Create directories
-            $this->stdout("\n[2/6] Creating Directories\n", 33);
+            $this->stdout("\n[2/5] Creating Directories\n", 33);
             $this->createDirectories();
 
             // Step 3: Generate MCP configuration
-            $this->stdout("\n[3/6] Generating MCP Configuration\n", 33);
+            $this->stdout("\n[3/5] Generating MCP Configuration\n", 33);
             $this->generateConfigFiles($envInfo);
 
-            // Step 4: Install guidelines and skills
-            $this->stdout("\n[4/6] Installing Guidelines & Skills\n", 33);
-            $this->installGuidelines();
+            // Step 4: Install skills to .claude/skills/ and write CLAUDE.md
+            $this->stdout("\n[4/5] Installing Skills & Writing CLAUDE.md\n", 33);
             $this->installSkills();
-
-            // Step 5: Write CLAUDE.md
-            $this->stdout("\n[5/6] Writing CLAUDE.md\n", 33);
             $this->writeClaudeMd();
 
-            // Step 6: Build search index
-            $this->stdout("\n[6/6] Building Search Index\n", 33);
+            // Step 5: Build search index
+            $this->stdout("\n[5/5] Building Search Index\n", 33);
             $this->buildSearchIndex();
 
             // Success message
@@ -125,7 +121,6 @@ class InstallController extends Controller
 
         $directories = [
             $basePath . '/.ai',
-            $basePath . '/.ai/guidelines',
             $basePath . '/.ai/skills',
             $basePath . '/.claude',
             $basePath . '/.claude/skills',
@@ -183,66 +178,47 @@ class InstallController extends Controller
     }
 
     /**
-     * Copy guidelines from package to application .ai/guidelines/
-     */
-    private function installGuidelines(): void
-    {
-        $appBasePath = ProjectRootResolver::resolve();
-        $targetPath = $appBasePath . '/.ai/guidelines';
-        $packageRoot = dirname(__DIR__, 2);
-        $sourcePath = $packageRoot . '/.ai/guidelines';
-
-        if (is_dir($sourcePath)) {
-            try {
-                FileHelper::copyDirectory($sourcePath, $targetPath, [
-                    'dirMode' => 0755,
-                    'fileMode' => 0644,
-                ]);
-                $this->stdout("  ✓ Installed guidelines to .ai/guidelines/\n", 32);
-            } catch (\Exception $e) {
-                $this->stderr("  ✗ Failed to copy guidelines: " . $e->getMessage() . "\n", 31);
-            }
-        } else {
-            $this->stdout("  ! Guidelines source not found at: $sourcePath\n", 33);
-        }
-    }
-
-    /**
-     * Copy skills from package to .ai/skills/ and .claude/skills/
+     * Install skills to .claude/skills/ from vendor and project .ai/skills/
+     *
+     * Yii2-specific skills are read directly from the vendor package.
+     * Project-specific skills live in .ai/skills/ and are also synced.
      */
     private function installSkills(): void
     {
         $appBasePath = ProjectRootResolver::resolve();
         $packageRoot = dirname(__DIR__, 2);
-        $sourcePath = $packageRoot . '/.ai/skills';
-        $aiSkillsPath = $appBasePath . '/.ai/skills';
+        $vendorSkillsPath = $packageRoot . '/.ai/skills';
+        $projectSkillsPath = $appBasePath . '/.ai/skills';
         $claudeSkillsPath = $appBasePath . '/.claude/skills';
 
-        if (!is_dir($sourcePath)) {
-            $this->stdout("  ! Skills source not found at: $sourcePath\n", 33);
-            return;
+        // Copy vendor (Yii2) skills to .claude/skills/
+        if (is_dir($vendorSkillsPath)) {
+            try {
+                FileHelper::copyDirectory($vendorSkillsPath, $claudeSkillsPath, [
+                    'dirMode' => 0755,
+                    'fileMode' => 0644,
+                ]);
+            } catch (\Exception $e) {
+                $this->stderr("  ✗ Failed to copy vendor skills: " . $e->getMessage() . "\n", 31);
+                return;
+            }
+        } else {
+            $this->stdout("  ! Vendor skills source not found at: $vendorSkillsPath\n", 33);
         }
 
-        // Copy to .ai/skills/ (source of truth for search indexing)
-        try {
-            FileHelper::copyDirectory($sourcePath, $aiSkillsPath, [
-                'dirMode' => 0755,
-                'fileMode' => 0644,
-            ]);
-        } catch (\Exception $e) {
-            $this->stderr("  ✗ Failed to copy skills to .ai/skills/: " . $e->getMessage() . "\n", 31);
-            return;
-        }
-
-        // Copy to .claude/skills/ (for Claude Code agent skill activation)
-        try {
-            FileHelper::copyDirectory($sourcePath, $claudeSkillsPath, [
-                'dirMode' => 0755,
-                'fileMode' => 0644,
-            ]);
-        } catch (\Exception $e) {
-            $this->stderr("  ✗ Failed to copy skills to .claude/skills/: " . $e->getMessage() . "\n", 31);
-            return;
+        // Copy project-specific skills to .claude/skills/
+        if (is_dir($projectSkillsPath)) {
+            $projectSkillDirs = glob($projectSkillsPath . '/*', GLOB_ONLYDIR) ?: [];
+            foreach ($projectSkillDirs as $skillDir) {
+                $name = basename($skillDir);
+                $targetDir = $claudeSkillsPath . '/' . $name;
+                if (!is_dir($targetDir)) {
+                    FileHelper::copyDirectory($skillDir, $targetDir, [
+                        'dirMode' => 0755,
+                        'fileMode' => 0644,
+                    ]);
+                }
+            }
         }
 
         // Count installed skills
@@ -254,22 +230,23 @@ class InstallController extends Controller
     /**
      * Write guidelines to CLAUDE.md
      *
-     * Reads all .md files from .ai/guidelines/ (yii2-boost.md first, then
-     * project-specific files sorted alphabetically) and embeds them in the
-     * <yii2-boost-guidelines> block.
+     * Reads guidelines from the vendor package and embeds them in the
+     * <yii2-boost-guidelines> block. Skills are discovered from both
+     * vendor and project .ai/skills/.
      */
     private function writeClaudeMd(): void
     {
         $appBasePath = ProjectRootResolver::resolve();
-        $guidelinesPath = $appBasePath . '/.ai/guidelines';
+        $packageRoot = dirname(__DIR__, 2);
+        $vendorGuidelinesPath = $packageRoot . '/.ai/guidelines';
         $claudeMdPath = $appBasePath . '/CLAUDE.md';
 
-        if (!is_dir($guidelinesPath)) {
-            $this->stdout("  ! Guidelines directory not found, skipping CLAUDE.md\n", 33);
+        if (!is_dir($vendorGuidelinesPath)) {
+            $this->stdout("  ! Vendor guidelines not found, skipping CLAUDE.md\n", 33);
             return;
         }
 
-        $files = FileHelper::findFiles($guidelinesPath, [
+        $files = FileHelper::findFiles($vendorGuidelinesPath, [
             'only' => ['*.md'],
             'recursive' => false,
         ]);
@@ -307,8 +284,8 @@ class InstallController extends Controller
 
         $guidelineContent = implode("\n\n---\n\n", $parts);
 
-        // Discover installed skills for the activation section
-        $skills = GuidelineWriter::discoverSkills($appBasePath . '/.ai/skills');
+        // Discover skills from vendor and project
+        $skills = $this->discoverAllSkills();
 
         if (GuidelineWriter::write($claudeMdPath, $guidelineContent, $skills)) {
             $this->stdout("  ✓ Updated CLAUDE.md with guidelines\n", 32);
@@ -323,7 +300,34 @@ class InstallController extends Controller
     }
 
     /**
-     * Build the FTS5 search index from guidelines and skills
+     * Discover skills from both vendor package and project .ai/skills/.
+     *
+     * Project skills override vendor skills with the same name.
+     *
+     * @return array<array{name: string, description: string}>
+     */
+    private function discoverAllSkills(): array
+    {
+        $appBasePath = ProjectRootResolver::resolve();
+        $packageRoot = dirname(__DIR__, 2);
+
+        $vendorSkills = GuidelineWriter::discoverSkills($packageRoot . '/.ai/skills');
+        $projectSkills = GuidelineWriter::discoverSkills($appBasePath . '/.ai/skills');
+
+        // Merge: project skills override vendor skills by name
+        $merged = [];
+        foreach ($vendorSkills as $skill) {
+            $merged[$skill['name']] = $skill;
+        }
+        foreach ($projectSkills as $skill) {
+            $merged[$skill['name']] = $skill;
+        }
+
+        return array_values($merged);
+    }
+
+    /**
+     * Build the FTS5 search index from vendor guidelines/skills and project skills
      */
     private function buildSearchIndex(): void
     {
@@ -333,6 +337,7 @@ class InstallController extends Controller
         }
 
         $appPath = ProjectRootResolver::resolve();
+        $packageRoot = dirname(__DIR__, 2);
         $dbPath = Yii::getAlias('@runtime') . '/boost/search.db';
 
         $manager = new SearchIndexManager($dbPath);
@@ -342,8 +347,8 @@ class InstallController extends Controller
         $parser = new MarkdownSectionParser();
         $totalSections = 0;
 
-        // Index guidelines
-        $guidelinesPath = $appPath . '/.ai/guidelines';
+        // Index guidelines from vendor
+        $guidelinesPath = $packageRoot . '/.ai/guidelines';
         if (is_dir($guidelinesPath)) {
             $files = FileHelper::findFiles($guidelinesPath, [
                 'only' => ['*.md'],
@@ -351,7 +356,7 @@ class InstallController extends Controller
             ]);
 
             foreach ($files as $file) {
-                $relativePath = str_replace($appPath . '/.ai/guidelines/', '', $file);
+                $relativePath = str_replace($guidelinesPath . '/', '', $file);
                 $content = file_get_contents($file);
                 $parsed = $parser->parse($content, $file);
 
@@ -366,40 +371,63 @@ class InstallController extends Controller
             }
         }
 
-        // Index skills
-        $skillsPath = $appPath . '/.ai/skills';
-        if (is_dir($skillsPath)) {
-            $files = FileHelper::findFiles($skillsPath, [
-                'only' => ['*.md'],
-                'recursive' => true,
-            ]);
+        // Index skills from vendor
+        $totalSections += $this->indexSkillsFromPath($manager, $parser, $packageRoot . '/.ai/skills');
 
-            foreach ($files as $file) {
-                $relativePath = str_replace($appPath . '/.ai/skills/', '', $file);
-                $skillName = dirname($relativePath);
-                $content = file_get_contents($file);
-
-                // Strip YAML frontmatter before parsing
-                $content = $this->stripFrontmatter($content);
-
-                $parsed = $parser->parse($content, $file);
-
-                $count = $manager->indexSections(
-                    'bundled',
-                    'skills/' . $skillName,
-                    $relativePath,
-                    $parsed['file_title'],
-                    $parsed['sections']
-                );
-                $totalSections += $count;
-            }
-        }
+        // Index project-specific skills
+        $totalSections += $this->indexSkillsFromPath($manager, $parser, $appPath . '/.ai/skills');
 
         $manager->setMeta('last_rebuild', date('Y-m-d H:i:s'));
         $manager->setMeta('section_count', (string) $totalSections);
 
         $this->stdout("  ✓ Search index built: {$totalSections} sections\n", 32);
         $this->stdout("  Tip: Run 'php yii boost/update' to also index the Yii2 guide.\n", 33);
+    }
+
+    /**
+     * Index skills from a given directory path.
+     *
+     * @param SearchIndexManager $manager Search index manager
+     * @param MarkdownSectionParser $parser Markdown parser
+     * @param string $skillsPath Path to skills directory
+     * @return int Number of sections indexed
+     */
+    private function indexSkillsFromPath(
+        SearchIndexManager $manager,
+        MarkdownSectionParser $parser,
+        string $skillsPath
+    ): int {
+        if (!is_dir($skillsPath)) {
+            return 0;
+        }
+
+        $files = FileHelper::findFiles($skillsPath, [
+            'only' => ['*.md'],
+            'recursive' => true,
+        ]);
+
+        $totalSections = 0;
+        foreach ($files as $file) {
+            $relativePath = str_replace($skillsPath . '/', '', $file);
+            $skillName = dirname($relativePath);
+            $content = file_get_contents($file);
+
+            // Strip YAML frontmatter before parsing
+            $content = $this->stripFrontmatter($content);
+
+            $parsed = $parser->parse($content, $file);
+
+            $count = $manager->indexSections(
+                'bundled',
+                'skills/' . $skillName,
+                $relativePath,
+                $parsed['file_title'],
+                $parsed['sections']
+            );
+            $totalSections += $count;
+        }
+
+        return $totalSections;
     }
 
     /**
@@ -501,10 +529,11 @@ class InstallController extends Controller
         $this->stdout("  • CLAUDE.md - Guidelines (always loaded by AI agent)\n", 0);
         $this->stdout("  • .claude/skills/ - Skills (loaded on-demand when relevant)\n", 0);
         $this->stdout("  • .mcp.json - MCP server configuration\n", 0);
-        $this->stdout("  • .ai/ - Source guidelines and skills\n\n", 0);
+        $this->stdout("  • .ai/skills/ - For project-specific skills\n\n", 0);
 
         $this->stdout("How it works:\n", 36);
-        $this->stdout("  • Guidelines in CLAUDE.md are always in the AI context\n", 0);
+        $this->stdout("  • Yii2 guidelines & skills are loaded from the vendor package\n", 0);
+        $this->stdout("  • Project-specific skills go in .ai/skills/\n", 0);
         $this->stdout("  • Skills are activated automatically when the task is relevant\n", 0);
         $this->stdout("  • MCP tools provide live introspection of your application\n\n", 0);
 

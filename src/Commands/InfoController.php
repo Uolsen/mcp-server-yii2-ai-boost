@@ -76,8 +76,7 @@ class InfoController extends Controller
         $checks = [
             '.mcp.json' => 'MCP server configuration',
             'CLAUDE.md' => 'CLAUDE.md file',
-            '.ai/guidelines' => 'Guidelines directory',
-            '.ai/skills' => 'Skills source directory',
+            '.ai/skills' => 'Project skills directory',
             '.claude/skills' => 'Agent skills directory',
         ];
 
@@ -130,14 +129,14 @@ class InfoController extends Controller
      */
     private function displayGuidelines(): void
     {
-        $basePath = ProjectRootResolver::resolve();
-        $guidelinesPath = $basePath . '/.ai/guidelines';
+        $packageRoot = dirname(__DIR__, 2);
+        $guidelinesPath = $packageRoot . '/.ai/guidelines';
 
-        $this->stdout("Guidelines\n", 33);
+        $this->stdout("Guidelines (from vendor)\n", 33);
         $this->stdout("─────────────────────────────────────────\n", 33);
 
         if (!is_dir($guidelinesPath)) {
-            $this->stdout("  ✗ Guidelines directory not found\n", 31);
+            $this->stdout("  ✗ Vendor guidelines not found\n", 31);
             $this->stdout("\n", 0);
             return;
         }
@@ -147,7 +146,7 @@ class InfoController extends Controller
             $sizeKb = round(filesize($guidelineFile) / 1024, 1);
             $this->stdout("  ✓ yii2-boost.md ({$sizeKb}KB) — embedded in CLAUDE.md\n", 32);
         } else {
-            $this->stdout("  ✗ yii2-boost.md not found\n", 31);
+            $this->stdout("  ✗ yii2-boost.md not found in vendor\n", 31);
         }
 
         $this->stdout("\n", 0);

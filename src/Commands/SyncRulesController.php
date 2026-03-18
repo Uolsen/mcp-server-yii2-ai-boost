@@ -15,7 +15,12 @@ use yii\helpers\FileHelper;
 class SyncRulesController extends Controller
 {
     /**
-     * @var string Path to the .ai directory
+     * @var string Path to the vendor package root
+     */
+    private $packageRoot;
+
+    /**
+     * @var string Path to the project .ai directory
      */
     private $aiPath;
 
@@ -33,6 +38,7 @@ class SyncRulesController extends Controller
     {
         parent::init();
         $root = ProjectRootResolver::resolve();
+        $this->packageRoot = dirname(__DIR__, 2);
         $this->aiPath = $root . '/.ai';
         $this->cursorRulesPath = $root . '/.cursor/rules';
         $this->zedRulesPath = $root . '/.rules';
@@ -45,10 +51,9 @@ class SyncRulesController extends Controller
     {
         $this->stdout("Syncing Yii2 Boost rules to editor configurations...\n", 36);
 
-        $guidelinePath = $this->aiPath . '/guidelines/yii2-boost.md';
+        $guidelinePath = $this->packageRoot . '/.ai/guidelines/yii2-boost.md';
         if (!file_exists($guidelinePath)) {
-            $this->stderr("Error: Guidelines not found at {$guidelinePath}\n", 31);
-            $this->stderr("Run 'php yii boost/install' first.\n", 31);
+            $this->stderr("Error: Vendor guidelines not found at {$guidelinePath}\n", 31);
             return ExitCode::UNSPECIFIED_ERROR;
         }
 
@@ -102,22 +107,38 @@ class SyncRulesController extends Controller
         $mdc .= "## Core Guidelines\n\n";
         $mdc .= file_get_contents($guidelinePath) . "\n\n";
 
-        // 2. List available skills for reference
-        $skillsPath = $this->aiPath . '/skills';
-        if (is_dir($skillsPath)) {
-            $skillDirs = glob($skillsPath . '/*/SKILL.md');
-            if (!empty($skillDirs)) {
-                $mdc .= "## Available Skills Reference\n\n";
-                $mdc .= "The following detailed skill references are available in `.claude/skills/` ";
-                $mdc .= "and will be activated automatically when relevant:\n\n";
+        // 2. List available skills from vendor and project
+        $skillSources = [
+            $this->packageRoot . '/.ai/skills',
+            $this->aiPath . '/skills',
+        ];
 
-                foreach ($skillDirs as $skillFile) {
-                    $skillName = basename(dirname($skillFile));
-                    $description = $this->extractSkillDescription($skillFile);
-                    $mdc .= "- **{$skillName}**: {$description}\n";
-                }
-                $mdc .= "\n";
+        $skillEntries = [];
+        foreach ($skillSources as $skillsPath) {
+            if (!is_dir($skillsPath)) {
+                continue;
             }
+            $skillDirs = glob($skillsPath . '/*/SKILL.md');
+            if (empty($skillDirs)) {
+                continue;
+            }
+            foreach ($skillDirs as $skillFile) {
+                $skillName = basename(dirname($skillFile));
+                // Project skills override vendor skills with the same name
+                $skillEntries[$skillName] = $this->extractSkillDescription($skillFile);
+            }
+        }
+
+        if (!empty($skillEntries)) {
+            ksort($skillEntries);
+            $mdc .= "## Available Skills Reference\n\n";
+            $mdc .= "The following detailed skill references are available in `.claude/skills/` ";
+            $mdc .= "and will be activated automatically when relevant:\n\n";
+
+            foreach ($skillEntries as $skillName => $description) {
+                $mdc .= "- **{$skillName}**: {$description}\n";
+            }
+            $mdc .= "\n";
         }
 
         return $mdc;

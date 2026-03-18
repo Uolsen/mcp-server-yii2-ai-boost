@@ -69,7 +69,7 @@ class SemanticSearchToolTest extends ToolTestCase
         $result = $tool->execute(['query' => 'migration']);
 
         $this->assertIsString($result);
-        $this->assertStringContainsString('No guidelines found', $result);
+        $this->assertStringContainsString('No guidelines or skills found', $result);
     }
 
     public function testSearchWithIndex(): void
@@ -145,10 +145,11 @@ class SemanticSearchToolTest extends ToolTestCase
 
         $this->assertIsString($result);
         // Grep fallback will either show "FTS5 search index not built" or
-        // "No guidelines found" if the guidelines dir doesn't exist in test env
+        // "No guidelines or skills found" if the dirs don't exist in test env
         $this->assertTrue(
             strpos($result, 'FTS5 search index not built') !== false
-            || strpos($result, 'No guidelines found') !== false,
+            || strpos($result, 'No guidelines or skills found') !== false
+            || strpos($result, 'No content found matching') !== false,
             'Expected grep fallback message'
         );
     }

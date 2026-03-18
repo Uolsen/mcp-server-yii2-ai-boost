@@ -9,7 +9,7 @@ use codechap\yii2boost\Mcp\Tools\Base\BaseTool;
 use yii\helpers\FileHelper;
 
 /**
- * FTS5-powered semantic search over Yii2 guidelines and documentation.
+ * FTS5-powered semantic search over Yii2 guidelines, skills, and documentation.
  *
  * Replaces the old grep-based SearchGuidelinesTool with BM25-ranked,
  * section-level search using SQLite FTS5. Falls back to grep search
@@ -29,7 +29,7 @@ final class SemanticSearchTool extends BaseTool
 
     public function getDescription(): string
     {
-        return 'Searches Yii2 guidelines and documentation using full-text search with BM25 ranking. '
+        return 'Searches Yii2 guidelines, skills, and documentation using full-text search with BM25 ranking. '
             . 'Returns relevant sections (not full files) ranked by relevance. '
             . 'Supports phrases ("active record"), boolean (migration AND database), '
             . 'and prefix queries (migrat*). Use this when the user asks "How do I..." '
@@ -149,7 +149,7 @@ final class SemanticSearchTool extends BaseTool
         if (!empty($stats['sources'])) {
             $output .= "Sources:\n";
             foreach ($stats['sources'] as $source => $count) {
-                $label = $source === 'yii2_guide' ? 'Yii2 Guide' : 'Bundled Guidelines';
+                $label = $source === 'yii2_guide' ? 'Yii2 Guide' : 'Bundled Guidelines & Skills';
                 $output .= "  - {$label}: {$count} sections\n";
             }
             $output .= "\n";
@@ -186,6 +186,7 @@ final class SemanticSearchTool extends BaseTool
      * Grep-based fallback search (from the old SearchGuidelinesTool logic).
      *
      * Used when the FTS5 index hasn't been built yet.
+     * Searches both .ai/guidelines/ and .ai/skills/ directories.
      *
      * @param string $query Search query
      * @param string $category Category filter
@@ -194,30 +195,45 @@ final class SemanticSearchTool extends BaseTool
     private function grepFallback(string $query, string $category): string
     {
         $root = $this->projectRoot ?: $this->basePath;
-        $guidelinesPath = $root . '/.ai/guidelines';
+        $aiPath = $root . '/.ai';
 
-        if (!is_dir($guidelinesPath)) {
-            return "No guidelines found at {$guidelinesPath}. Run 'php yii boost/install' first.";
+        $files = [];
+
+        // Collect files from guidelines
+        $guidelinesPath = $aiPath . '/guidelines';
+        if (is_dir($guidelinesPath)) {
+            $files = array_merge($files, FileHelper::findFiles($guidelinesPath, [
+                'only' => ['*.md'],
+                'recursive' => true,
+            ]));
         }
 
-        $files = FileHelper::findFiles($guidelinesPath, [
-            'only' => ['*.md'],
-            'recursive' => true,
-        ]);
+        // Collect files from skills
+        $skillsPath = $aiPath . '/skills';
+        if (is_dir($skillsPath)) {
+            $files = array_merge($files, FileHelper::findFiles($skillsPath, [
+                'only' => ['*.md'],
+                'recursive' => true,
+            ]));
+        }
+
+        if (empty($files)) {
+            return "No guidelines or skills found in {$aiPath}. Run 'php yii boost/install' first.";
+        }
 
         $warning = "[Note: FTS5 search index not built. Using basic text search. "
             . "Run 'php yii boost/update' to build the full-text search index for better results.]\n\n";
 
         // Empty query — list topics
         if ($query === '') {
-            return $warning . $this->listTopics($files, $guidelinesPath, $category);
+            return $warning . $this->listTopics($files, $aiPath, $category);
         }
 
         $query = strtolower($query);
         $results = [];
 
         foreach ($files as $file) {
-            $relativePath = str_replace($guidelinesPath . '/', '', $file);
+            $relativePath = str_replace($aiPath . '/', '', $file);
             $fileCategory = dirname($relativePath);
 
             if ($category !== 'all' && $fileCategory !== $category && strpos($fileCategory, $category) === false) {
@@ -225,20 +241,24 @@ final class SemanticSearchTool extends BaseTool
             }
 
             $content = file_get_contents($file);
+
+            // Strip YAML frontmatter for matching
+            $searchContent = $this->stripFrontmatter($content);
+
             $filename = basename($file);
 
             $score = 0;
             if (strpos(strtolower($filename), $query) !== false) {
                 $score += 10;
             }
-            $matches = substr_count(strtolower($content), $query);
+            $matches = substr_count(strtolower($searchContent), $query);
             $score += min($matches, 5);
 
             if ($score > 0) {
                 $results[] = [
                     'path' => $relativePath,
                     'score' => $score,
-                    'content' => $content,
+                    'content' => $searchContent,
                 ];
             }
         }
@@ -250,10 +270,10 @@ final class SemanticSearchTool extends BaseTool
         $topResults = array_slice($results, 0, 3);
 
         if (empty($topResults)) {
-            return $warning . "No guidelines found matching '{$query}'. Use empty query to list available topics.";
+            return $warning . "No content found matching '{$query}'. Use empty query to list available topics.";
         }
 
-        $output = $warning . "Found " . count($topResults) . " relevant guidelines:\n\n";
+        $output = $warning . "Found " . count($topResults) . " relevant results:\n\n";
         foreach ($topResults as $result) {
             $output .= "--- File: {$result['path']} ---\n";
             $output .= $result['content'] . "\n\n";
@@ -263,19 +283,36 @@ final class SemanticSearchTool extends BaseTool
     }
 
     /**
-     * List available topics from guideline files.
+     * Strip YAML frontmatter from markdown content.
      *
-     * @param array $files List of guideline file paths
-     * @param string $guidelinesPath Base guidelines path
+     * @param string $content Markdown content
+     * @return string Content without frontmatter
+     */
+    private function stripFrontmatter(string $content): string
+    {
+        if (strpos($content, "---\n") === 0) {
+            $end = strpos($content, "\n---\n", 4);
+            if ($end !== false) {
+                return ltrim(substr($content, $end + 5));
+            }
+        }
+        return $content;
+    }
+
+    /**
+     * List available topics from guideline and skill files.
+     *
+     * @param array $files List of file paths
+     * @param string $aiPath Base .ai path
      * @param string $category Category filter
      * @return string Formatted topic list
      */
-    private function listTopics(array $files, string $guidelinesPath, string $category): string
+    private function listTopics(array $files, string $aiPath, string $category): string
     {
         $topics = [];
 
         foreach ($files as $file) {
-            $relativePath = str_replace($guidelinesPath . '/', '', $file);
+            $relativePath = str_replace($aiPath . '/', '', $file);
             $fileCategory = dirname($relativePath);
             $filename = basename($file, '.md');
 
@@ -284,6 +321,7 @@ final class SemanticSearchTool extends BaseTool
             }
 
             $content = file_get_contents($file);
+            $content = $this->stripFrontmatter($content);
             preg_match('/^#\s+(.+)$/m', $content, $matches);
             $title = $matches[1] ?? $filename;
             $sizeKb = round(filesize($file) / 1024, 1);
@@ -296,10 +334,10 @@ final class SemanticSearchTool extends BaseTool
         }
 
         if (empty($topics)) {
-            return "No guidelines found" . ($category !== 'all' ? " in category '{$category}'" : "") . ".";
+            return "No content found" . ($category !== 'all' ? " in category '{$category}'" : "") . ".";
         }
 
-        $output = "Available Yii2 Guidelines:\n\n";
+        $output = "Available Yii2 Guidelines & Skills:\n\n";
         foreach ($topics as $cat => $items) {
             $output .= "## {$cat}\n";
             foreach ($items as $item) {

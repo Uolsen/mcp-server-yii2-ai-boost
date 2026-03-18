@@ -10,14 +10,14 @@ use yii\console\ExitCode;
 use yii\helpers\FileHelper;
 
 /**
- * Syncs AI guidelines to editor configurations.
+ * Syncs AI guidelines and skills to editor configurations (Cursor, Zed).
  */
 class SyncRulesController extends Controller
 {
     /**
-     * @var string Path to the .ai/guidelines directory
+     * @var string Path to the .ai directory
      */
-    private $guidelinesPath;
+    private $aiPath;
 
     /**
      * @var string Path to the .cursor/rules directory
@@ -33,24 +33,26 @@ class SyncRulesController extends Controller
     {
         parent::init();
         $root = ProjectRootResolver::resolve();
-        $this->guidelinesPath = $root . '/.ai/guidelines';
+        $this->aiPath = $root . '/.ai';
         $this->cursorRulesPath = $root . '/.cursor/rules';
         $this->zedRulesPath = $root . '/.rules';
     }
 
     /**
-     * Syncs the guidelines to .cursor/rules/yii2-boost.mdc and .rules (Zed)
+     * Syncs guidelines and skills to .cursor/rules/yii2-boost.mdc and .rules (Zed)
      */
     public function actionIndex(): int
     {
-        $this->stdout("Syncing Yii2 Boost guidelines to Editor rules...\n", 36);
+        $this->stdout("Syncing Yii2 Boost rules to editor configurations...\n", 36);
 
-        if (!is_dir($this->guidelinesPath)) {
-            $this->stderr("Error: Guidelines directory not found at {$this->guidelinesPath}\n", 31);
+        $guidelinePath = $this->aiPath . '/guidelines/yii2-boost.md';
+        if (!file_exists($guidelinePath)) {
+            $this->stderr("Error: Guidelines not found at {$guidelinePath}\n", 31);
+            $this->stderr("Run 'php yii boost/install' first.\n", 31);
             return ExitCode::UNSPECIFIED_ERROR;
         }
 
-        $content = $this->generateMdcContent();
+        $content = $this->generateMdcContent($guidelinePath);
 
         // Show preview before asking for confirmation
         $this->stdout("\nProposed rules content preview (first 800 characters):\n", 33);
@@ -85,38 +87,62 @@ class SyncRulesController extends Controller
     /**
      * Generates the content for the MDC file.
      *
-     * It prioritizes the Core markdown guide and then appends key structural references.
+     * Includes the condensed guideline and a summary of available skills.
+     *
+     * @param string $guidelinePath Path to the yii2-boost.md guideline
+     * @return string
      */
-    private function generateMdcContent(): string
+    private function generateMdcContent(string $guidelinePath): string
     {
         $mdc = "# Yii2 Framework Guidelines (Boost)\n\n";
-        $mdc .= "You are an expert Yii2 developer working in a Yii 2.0.45 application.\n";
+        $mdc .= "You are an expert Yii2 developer working in a Yii 2.0.45 advanced template application.\n";
         $mdc .= "Follow these strict guidelines and structural references.\n\n";
 
-        // 1. Core Guide (High Priority)
-        $coreFile = $this->guidelinesPath . '/core/yii2-2.0.45.md';
-        if (file_exists($coreFile)) {
-            $mdc .= "## Core Framework Guide\n\n";
-            $mdc .= file_get_contents($coreFile) . "\n\n";
-        }
+        // 1. Core guidelines (always loaded)
+        $mdc .= "## Core Guidelines\n\n";
+        $mdc .= file_get_contents($guidelinePath) . "\n\n";
 
-        // 2. Key Structural References
-        $references = [
-            'Controller' => 'http_web/yii-web-controller.md',
-            'ActiveRecord' => 'database/yii-active-record.md',
-            'Migration' => 'database/yii-migration.md',
-            'View' => 'views_templating/yii-view.md',
-        ];
+        // 2. List available skills for reference
+        $skillsPath = $this->aiPath . '/skills';
+        if (is_dir($skillsPath)) {
+            $skillDirs = glob($skillsPath . '/*/SKILL.md');
+            if (!empty($skillDirs)) {
+                $mdc .= "## Available Skills Reference\n\n";
+                $mdc .= "The following detailed skill references are available in `.claude/skills/` ";
+                $mdc .= "and will be activated automatically when relevant:\n\n";
 
-        foreach ($references as $name => $relPath) {
-            $file = $this->guidelinesPath . '/' . $relPath;
-            if (file_exists($file)) {
-                $mdc .= "## Reference: {$name} Structure\n\n";
-                $mdc .= "Use this structure for {$name} classes:\n\n";
-                $mdc .= file_get_contents($file) . "\n\n";
+                foreach ($skillDirs as $skillFile) {
+                    $skillName = basename(dirname($skillFile));
+                    $description = $this->extractSkillDescription($skillFile);
+                    $mdc .= "- **{$skillName}**: {$description}\n";
+                }
+                $mdc .= "\n";
             }
         }
 
         return $mdc;
+    }
+
+    /**
+     * Extract the description from a SKILL.md frontmatter.
+     *
+     * @param string $skillFile Path to the SKILL.md file
+     * @return string Description or fallback text
+     */
+    private function extractSkillDescription(string $skillFile): string
+    {
+        $content = file_get_contents($skillFile);
+
+        if (strpos($content, "---\n") === 0) {
+            $end = strpos($content, "\n---\n", 4);
+            if ($end !== false) {
+                $frontmatter = substr($content, 4, $end - 4);
+                if (preg_match('/^description:\s*["\']?(.+?)["\']?\s*$/m', $frontmatter, $matches)) {
+                    return trim($matches[1]);
+                }
+            }
+        }
+
+        return 'Detailed reference for ' . basename(dirname($skillFile));
     }
 }

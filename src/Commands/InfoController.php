@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace codechap\yii2boost\Commands;
 
+use codechap\yii2boost\Helpers\GuidelineWriter;
 use codechap\yii2boost\Helpers\ProjectRootResolver;
 use codechap\yii2boost\Mcp\Search\SearchIndexManager;
 use Yii;
@@ -36,6 +37,7 @@ class InfoController extends Controller
             $this->displayConfigStatus();
             $this->displayTools();
             $this->displayGuidelines();
+            $this->displaySkills();
             $this->displaySearchIndex();
 
             return ExitCode::OK;
@@ -71,17 +73,30 @@ class InfoController extends Controller
         $this->stdout("Configuration Status\n", 33);
         $this->stdout("─────────────────────────────────────────\n", 33);
 
-        $files = [
+        $checks = [
             '.mcp.json' => 'MCP server configuration',
+            'CLAUDE.md' => 'CLAUDE.md file',
             '.ai/guidelines' => 'Guidelines directory',
+            '.ai/skills' => 'Skills source directory',
+            '.claude/skills' => 'Agent skills directory',
         ];
 
-        foreach ($files as $file => $description) {
+        foreach ($checks as $file => $description) {
             $path = $basePath . '/' . $file;
-            if (file_exists($path)) {
+            if (file_exists($path) || is_dir($path)) {
                 $this->stdout("  ✓ $description\n", 32);
             } else {
                 $this->stdout("  ✗ $description (missing)\n", 31);
+            }
+        }
+
+        // Check if CLAUDE.md contains guidelines block
+        $claudeMdPath = $basePath . '/CLAUDE.md';
+        if (file_exists($claudeMdPath)) {
+            if (GuidelineWriter::hasGuidelines($claudeMdPath)) {
+                $this->stdout("  ✓ CLAUDE.md contains guidelines block\n", 32);
+            } else {
+                $this->stdout("  ✗ CLAUDE.md missing guidelines block\n", 31);
             }
         }
 
@@ -123,18 +138,52 @@ class InfoController extends Controller
 
         if (!is_dir($guidelinesPath)) {
             $this->stdout("  ✗ Guidelines directory not found\n", 31);
+            $this->stdout("\n", 0);
             return;
         }
 
-        $coreGuidelinesPath = $guidelinesPath . '/core';
-        if (is_dir($coreGuidelinesPath)) {
-            $files = glob($coreGuidelinesPath . '/*.md');
-            foreach ($files as $file) {
-                $this->stdout("  ✓ " . basename($file) . "\n", 32);
-            }
+        $guidelineFile = $guidelinesPath . '/yii2-boost.md';
+        if (file_exists($guidelineFile)) {
+            $sizeKb = round(filesize($guidelineFile) / 1024, 1);
+            $this->stdout("  ✓ yii2-boost.md ({$sizeKb}KB) — embedded in CLAUDE.md\n", 32);
+        } else {
+            $this->stdout("  ✗ yii2-boost.md not found\n", 31);
         }
 
         $this->stdout("\n", 0);
+    }
+
+    /**
+     * Display skills status
+     */
+    private function displaySkills(): void
+    {
+        $basePath = ProjectRootResolver::resolve();
+        $claudeSkillsPath = $basePath . '/.claude/skills';
+
+        $this->stdout("Skills (on-demand)\n", 33);
+        $this->stdout("─────────────────────────────────────────\n", 33);
+
+        if (!is_dir($claudeSkillsPath)) {
+            $this->stdout("  ✗ Skills directory not found (.claude/skills/)\n", 31);
+            $this->stdout("\n", 0);
+            return;
+        }
+
+        $skillFiles = glob($claudeSkillsPath . '/*/SKILL.md');
+        if (empty($skillFiles)) {
+            $this->stdout("  ✗ No skills installed\n", 31);
+            $this->stdout("\n", 0);
+            return;
+        }
+
+        foreach ($skillFiles as $skillFile) {
+            $skillName = basename(dirname($skillFile));
+            $sizeKb = round(filesize($skillFile) / 1024, 1);
+            $this->stdout("  ✓ {$skillName} ({$sizeKb}KB)\n", 32);
+        }
+
+        $this->stdout("\nTotal: " . count($skillFiles) . " skills installed\n\n", 32);
     }
 
     /**

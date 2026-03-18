@@ -137,15 +137,61 @@ class UpdateController extends Controller
             throw new \Exception("Failed to copy skills: " . $e->getMessage());
         }
 
-        // Remove stale skills that no longer exist in source
-        $this->cleanStaleSkills($sourcePath, $claudeSkillsPath);
+        // Sync .claude/skills/ with .ai/skills/ (the combined source of truth)
+        // This preserves project-specific skills in .ai/skills/ that are not from the package
+        $this->syncClaudeSkills($aiSkillsPath, $claudeSkillsPath);
+
+        // Clean .ai/skills/ entries that exist neither in package nor as project-specific skills
         $this->cleanStaleSkills($sourcePath, $aiSkillsPath);
     }
 
     /**
-     * Remove skill directories that no longer exist in source.
+     * Sync .claude/skills/ with .ai/skills/ (the combined source of truth).
      *
-     * @param string $sourcePath Source skills directory
+     * Copies project-specific skills from .ai/skills/ to .claude/skills/ and
+     * removes skills from .claude/skills/ that no longer exist in .ai/skills/.
+     *
+     * @param string $aiSkillsPath .ai/skills/ directory (combined: package + project)
+     * @param string $claudeSkillsPath .claude/skills/ directory
+     */
+    private function syncClaudeSkills(string $aiSkillsPath, string $claudeSkillsPath): void
+    {
+        if (!is_dir($aiSkillsPath) || !is_dir($claudeSkillsPath)) {
+            return;
+        }
+
+        $aiSkillNames = array_map('basename', glob($aiSkillsPath . '/*', GLOB_ONLYDIR) ?: []);
+
+        // Copy project-specific skills from .ai/skills/ to .claude/skills/
+        foreach ($aiSkillNames as $name) {
+            $aiDir = $aiSkillsPath . '/' . $name;
+            $claudeDir = $claudeSkillsPath . '/' . $name;
+            if (!is_dir($claudeDir) && is_dir($aiDir)) {
+                FileHelper::copyDirectory($aiDir, $claudeDir, [
+                    'dirMode' => 0755,
+                    'fileMode' => 0644,
+                ]);
+            }
+        }
+
+        // Remove skills from .claude/skills/ that no longer exist in .ai/skills/
+        $claudeSkills = glob($claudeSkillsPath . '/*', GLOB_ONLYDIR) ?: [];
+        foreach ($claudeSkills as $claudeDir) {
+            $name = basename($claudeDir);
+            if (!in_array($name, $aiSkillNames, true)) {
+                FileHelper::removeDirectory($claudeDir);
+                $this->stdout("  ✓ Removed stale skill: {$name}\n", 33);
+            }
+        }
+    }
+
+    /**
+     * Remove skill directories from target that no longer exist in source.
+     *
+     * Only removes skills that match the package prefix (yii2-*) to avoid
+     * deleting project-specific skills.
+     *
+     * @param string $sourcePath Package source skills directory
      * @param string $targetPath Target skills directory
      */
     private function cleanStaleSkills(string $sourcePath, string $targetPath): void
@@ -159,28 +205,71 @@ class UpdateController extends Controller
 
         foreach ($targetSkills as $targetDir) {
             $name = basename($targetDir);
-            if (!in_array($name, $sourceSkills, true)) {
+            // Only clean package-managed skills (yii2-* prefix)
+            // Project-specific skills are not touched
+            if (strpos($name, 'yii2-') === 0 && !in_array($name, $sourceSkills, true)) {
                 FileHelper::removeDirectory($targetDir);
-                $this->stdout("  ✓ Removed stale skill: {$name}\n", 33);
+                $this->stdout("  ✓ Removed stale package skill: {$name}\n", 33);
             }
         }
     }
 
     /**
      * Regenerate CLAUDE.md guidelines block (preserves user content)
+     *
+     * Reads all .md files from .ai/guidelines/ (yii2-boost.md first, then
+     * project-specific files sorted alphabetically) and embeds them in the
+     * <yii2-boost-guidelines> block.
      */
     private function updateClaudeMd(): void
     {
         $appPath = ProjectRootResolver::resolve();
-        $guidelinePath = $appPath . '/.ai/guidelines/yii2-boost.md';
+        $guidelinesPath = $appPath . '/.ai/guidelines';
         $claudeMdPath = $appPath . '/CLAUDE.md';
 
-        if (!file_exists($guidelinePath)) {
-            $this->stdout("  ! Guideline file not found, skipping CLAUDE.md\n", 33);
+        if (!is_dir($guidelinesPath)) {
+            $this->stdout("  ! Guidelines directory not found, skipping CLAUDE.md\n", 33);
             return;
         }
 
-        $guidelineContent = file_get_contents($guidelinePath);
+        $files = FileHelper::findFiles($guidelinesPath, [
+            'only' => ['*.md'],
+            'recursive' => false,
+        ]);
+
+        if (empty($files)) {
+            $this->stdout("  ! No guideline files found, skipping CLAUDE.md\n", 33);
+            return;
+        }
+
+        // Sort: yii2-boost.md first, then alphabetically
+        usort($files, static function (string $a, string $b): int {
+            $aBase = basename($a);
+            $bBase = basename($b);
+            if ($aBase === 'yii2-boost.md') {
+                return -1;
+            }
+            if ($bBase === 'yii2-boost.md') {
+                return 1;
+            }
+            return strcmp($aBase, $bBase);
+        });
+
+        $parts = [];
+        foreach ($files as $file) {
+            $content = file_get_contents($file);
+            if ($content !== false && trim($content) !== '') {
+                $parts[] = trim($content);
+                $this->stdout("  ✓ Including: " . basename($file) . "\n", 32);
+            }
+        }
+
+        if (empty($parts)) {
+            $this->stdout("  ! No guideline content found, skipping CLAUDE.md\n", 33);
+            return;
+        }
+
+        $guidelineContent = implode("\n\n---\n\n", $parts);
 
         // Discover installed skills for the activation section
         $skills = GuidelineWriter::discoverSkills($appPath . '/.ai/skills');

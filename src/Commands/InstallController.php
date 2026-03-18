@@ -253,19 +253,59 @@ class InstallController extends Controller
 
     /**
      * Write guidelines to CLAUDE.md
+     *
+     * Reads all .md files from .ai/guidelines/ (yii2-boost.md first, then
+     * project-specific files sorted alphabetically) and embeds them in the
+     * <yii2-boost-guidelines> block.
      */
     private function writeClaudeMd(): void
     {
         $appBasePath = ProjectRootResolver::resolve();
-        $guidelinePath = $appBasePath . '/.ai/guidelines/yii2-boost.md';
+        $guidelinesPath = $appBasePath . '/.ai/guidelines';
         $claudeMdPath = $appBasePath . '/CLAUDE.md';
 
-        if (!file_exists($guidelinePath)) {
-            $this->stdout("  ! Guideline file not found, skipping CLAUDE.md\n", 33);
+        if (!is_dir($guidelinesPath)) {
+            $this->stdout("  ! Guidelines directory not found, skipping CLAUDE.md\n", 33);
             return;
         }
 
-        $guidelineContent = file_get_contents($guidelinePath);
+        $files = FileHelper::findFiles($guidelinesPath, [
+            'only' => ['*.md'],
+            'recursive' => false,
+        ]);
+
+        if (empty($files)) {
+            $this->stdout("  ! No guideline files found, skipping CLAUDE.md\n", 33);
+            return;
+        }
+
+        // Sort: yii2-boost.md first, then alphabetically
+        usort($files, static function (string $a, string $b): int {
+            $aBase = basename($a);
+            $bBase = basename($b);
+            if ($aBase === 'yii2-boost.md') {
+                return -1;
+            }
+            if ($bBase === 'yii2-boost.md') {
+                return 1;
+            }
+            return strcmp($aBase, $bBase);
+        });
+
+        $parts = [];
+        foreach ($files as $file) {
+            $content = file_get_contents($file);
+            if ($content !== false && trim($content) !== '') {
+                $parts[] = trim($content);
+            }
+        }
+
+        if (empty($parts)) {
+            $this->stdout("  ! No guideline content found, skipping CLAUDE.md\n", 33);
+            return;
+        }
+
+        $guidelineContent = implode("\n\n---\n\n", $parts);
 
         // Discover installed skills for the activation section
         $skills = GuidelineWriter::discoverSkills($appBasePath . '/.ai/skills');

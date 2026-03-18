@@ -1,38 +1,91 @@
-# Yii2 2.0.45 Framework Guidelines
+# Yii2 2.0.45 Framework Guidelines (Advanced Template)
 
 ## Application Structure
 
-### Templates
-- **Basic** (`yii2-app-basic`): Single-tier, all files in one directory
-- **Advanced** (`yii2-app-advanced`): Separated frontend, backend, common, console
-- **Modular**: Custom structure with isolated modules
+### Advanced Template (`yii2-app-advanced`)
+Multi-tier application with separated frontend, backend, console, and shared common code.
 
-### Directory Layout
 ```
-app/
-├── config/           # web.php, console.php, params.php
-├── controllers/      # Web controllers
-├── models/           # AR models and form models
-├── views/            # View templates
-├── web/              # Public root (index.php, assets/)
-├── commands/         # Console commands
-├── components/       # Custom components
-├── migrations/       # Database migrations
-├── modules/          # Application modules
-└── runtime/          # Generated files, logs, cache
+project-root/
+├── common/               # Shared across all applications
+│   ├── config/            # main.php, main-local.php, params.php, params-local.php, bootstrap.php
+│   ├── models/            # Shared AR models (User, LoginForm)
+│   ├── components/        # Shared components
+│   ├── mail/              # Shared email templates
+│   ├── tests/             # Common tests
+│   └── widgets/           # Shared widgets
+├── frontend/              # Public-facing web application
+│   ├── assets/            # Asset bundles
+│   ├── config/            # main.php, main-local.php, params.php, params-local.php
+│   ├── controllers/       # Frontend controllers
+│   ├── models/            # Frontend-specific models
+│   ├── views/             # Frontend views and layouts
+│   ├── web/               # Public root (index.php, assets/)
+│   ├── widgets/           # Frontend widgets
+│   └── runtime/           # Generated files, logs, cache
+├── backend/               # Admin panel web application
+│   ├── assets/            # Asset bundles
+│   ├── config/            # main.php, main-local.php, params.php, params-local.php
+│   ├── controllers/       # Backend controllers
+│   ├── models/            # Backend-specific models
+│   ├── views/             # Backend views and layouts
+│   ├── web/               # Public root (index.php, assets/)
+│   ├── widgets/           # Backend widgets
+│   └── runtime/           # Generated files, logs, cache
+├── console/               # Console application (cron, migrations)
+│   ├── config/            # main.php, main-local.php, params.php, params-local.php
+│   ├── controllers/       # Console commands
+│   ├── migrations/        # Database migrations
+│   ├── models/            # Console-specific models
+│   └── runtime/           # Generated files, logs
+├── environments/          # Environment configs (dev, prod)
+│   ├── dev/               # Development overrides
+│   └── prod/              # Production overrides
+├── vendor/                # Composer dependencies
+├── init                   # Environment initialization script
+├── init.bat               # Windows init script
+├── yii                    # Console entry point
+├── composer.json
+└── requirements.php
 ```
 
 ### Namespaces
-- Application: `app\*`
-- Module: `app\modules\{name}\*`
-- Component: `app\components\*`
+- Common: `common\models\*`, `common\components\*`
+- Frontend: `frontend\controllers\*`, `frontend\models\*`
+- Backend: `backend\controllers\*`, `backend\models\*`
+- Console: `console\controllers\*`, `console\models\*`
+
+### Path Aliases (defined in `common/config/bootstrap.php`)
+```php
+Yii::setAlias('@common', dirname(__DIR__));
+Yii::setAlias('@frontend', dirname(dirname(__DIR__)) . '/frontend');
+Yii::setAlias('@backend', dirname(dirname(__DIR__)) . '/backend');
+Yii::setAlias('@console', dirname(dirname(__DIR__)) . '/console');
+```
+
+### Configuration Merging Order
+Each application merges configs in this order (later overrides earlier):
+```
+common/config/main.php          → shared base config
+common/config/main-local.php    → shared environment-specific (gitignored)
+{app}/config/main.php           → app-specific base config
+{app}/config/main-local.php     → app-specific environment-specific (gitignored)
+```
+Parameters follow the same pattern with `params.php` and `params-local.php`.
+
+### Environment Initialization
+```bash
+php init    # Interactive: choose Development or Production
+php init --env=Development --overwrite=All    # Non-interactive
+```
+The `init` script copies files from `environments/{env}/` to the project root, generating all `-local.php` config files and entry scripts.
 
 ---
 
 ## Controllers
 
 ```php
-namespace app\controllers;
+namespace frontend\controllers;
 
 use yii\web\Controller;
 
@@ -76,9 +129,9 @@ throw new ForbiddenHttpException('Access denied');
 
 ## Models
 
-### Active Record
+### Shared Active Record (common/models/)
 ```php
-namespace app\models;
+namespace common\models;
 
 use yii\db\ActiveRecord;
 
@@ -112,6 +165,11 @@ class User extends ActiveRecord
 }
 ```
 
+### Model Placement
+- **`common/models/`** - Shared across apps (User, LoginForm, base AR models)
+- **`frontend/models/`** - Frontend-specific (SignupForm, ContactForm, search models)
+- **`backend/models/`** - Backend-specific (admin forms, report models)
+
 ### Common Validators
 ```php
 ['field', 'required']
@@ -139,15 +197,21 @@ $model->scenario = 'create';
 
 ### Form Models
 ```php
-class LoginForm extends Model
+namespace frontend\models;
+
+use yii\base\Model;
+
+class ContactForm extends Model
 {
-    public $username;
-    public $password;
+    public $name;
+    public $email;
+    public $body;
 
     public function rules()
     {
         return [
-            [['username', 'password'], 'required'],
+            [['name', 'email', 'body'], 'required'],
+            ['email', 'email'],
         ];
     }
 }
@@ -160,25 +224,25 @@ class LoginForm extends Model
 ### Rendering
 ```php
 // Controller
-return $this->render('view', ['data' => $data]);
-return $this->renderPartial('_partial', ['data' => $data]);
+return $this->render('view', ['model' => $model]);
+return $this->renderPartial('_partial', ['model' => $model]);
 
-// View
+// View - always encode user input
 <?= Html::encode($userInput) ?>
 <?= HtmlPurifier::process($richText) ?>
 ```
 
-### Layouts
+### Layouts (per-application)
 ```php
-<!-- views/layouts/main.php -->
+<!-- frontend/views/layouts/main.php or backend/views/layouts/main.php -->
 <?= $content ?>  <!-- Content renders here -->
 ```
 
 ### Widgets
 ```php
-<?= ListView::widget([
+<?= GridView::widget([
     'dataProvider' => $dataProvider,
-    'itemView' => '_item',
+    'columns' => ['id', 'username', 'email'],
 ]) ?>
 
 <?php $form = ActiveForm::begin(); ?>
@@ -186,8 +250,12 @@ return $this->renderPartial('_partial', ['data' => $data]);
 <?php ActiveForm::end(); ?>
 ```
 
-### Assets
+### Assets (per-application)
 ```php
+namespace frontend\assets;
+
+use yii\web\AssetBundle;
+
 class AppAsset extends AssetBundle
 {
     public $basePath = '@webroot';
@@ -202,13 +270,20 @@ class AppAsset extends AssetBundle
 
 ## Components
 
-### Registration
+### Registration (shared in common, app-specific in {app}/config)
 ```php
-// config/web.php
+// common/config/main.php - available to all apps
 'components' => [
     'myService' => [
-        'class' => 'app\components\MyService',
+        'class' => 'common\components\MyService',
         'config' => 'value',
+    ],
+],
+
+// frontend/config/main.php - frontend only
+'components' => [
+    'frontendService' => [
+        'class' => 'frontend\components\FrontendService',
     ],
 ],
 
@@ -218,6 +293,10 @@ Yii::$app->myService->doSomething();
 
 ### Custom Component
 ```php
+namespace common\components;
+
+use yii\base\Component;
+
 class MyService extends Component
 {
     public $config;
@@ -231,8 +310,10 @@ class MyService extends Component
 
 ### DI Container
 ```php
-Yii::$container->setSingleton('myService', ['class' => MyService::class]);
-Yii::$container->set('myService', ['class' => MyService::class]);
+Yii::$container->set(PaymentInterface::class, StripePayment::class);
+Yii::$container->setSingleton(NotificationService::class, [
+    'class' => NotificationService::class,
+]);
 ```
 
 ---
@@ -296,7 +377,7 @@ User::find()
 
 ### Caching
 ```php
-$data = Yii::$app->cache->getOrSet('key', function() {
+$data = Yii::$app->cache->getOrSet('key', function () {
     return expensiveOperation();
 }, 3600);
 
@@ -309,7 +390,7 @@ User::find()->cache(3600)->all();
 ## Console Commands
 
 ```php
-namespace app\commands;
+namespace console\controllers;
 
 use yii\console\Controller;
 use yii\console\ExitCode;
@@ -329,9 +410,11 @@ class MyController extends Controller
 ## Migrations
 
 ```php
+use yii\db\Migration;
+
 class m210101_000000_create_user extends Migration
 {
-    public function up()
+    public function safeUp()
     {
         $this->createTable('{{%user}}', [
             'id' => $this->primaryKey(),
@@ -340,40 +423,44 @@ class m210101_000000_create_user extends Migration
         ]);
     }
 
-    public function down()
+    public function safeDown()
     {
         $this->dropTable('{{%user}}');
     }
 }
 ```
 
+Migrations live in `console/migrations/` and run via: `php yii migrate`
+
 ---
 
 ## Anti-Patterns
 
 ```php
-// ❌ Echo in controllers
+// WRONG: Echo in controllers
 echo "Hello";
-// ✓ Return response
+// RIGHT: Return response
 return $this->render('view');
 
-// ❌ Business logic in views
-<?php if($post->author_id == Yii::$app->user->id): ?>
-// ✓ Filter in controller/model
+// WRONG: Business logic in views
+<?php if ($post->author_id == Yii::$app->user->id): ?>
+// RIGHT: Filter in controller/model
 
-// ❌ Skip validation
+// WRONG: Ignoring save() return value
 $user->save();
-// ✓ Always validate
-if ($user->validate() && $user->save()) {}
+// RIGHT: Check return value
+if (!$user->save()) {
+    // handle validation errors: $user->getErrors()
+}
 
-// ❌ Hardcode values
+// WRONG: Hardcode values
 $email = 'admin@example.com';
-// ✓ Use params
+// RIGHT: Use params
 $email = Yii::$app->params['adminEmail'];
 
-// ❌ Raw SQL with variables
+// WRONG: Raw SQL with variables
 "SELECT * FROM user WHERE id=$id"
-// ✓ Parameter binding
+// RIGHT: Parameter binding
 User::findOne($id);
 ```
 
@@ -383,8 +470,11 @@ User::findOne($id);
 
 1. Always validate input via model rules
 2. Use eager loading to avoid N+1 queries
-3. Separate concerns: Controllers → Models → Views
+3. Separate concerns: Controllers -> Models -> Views
 4. Encode all output (XSS prevention)
 5. Use parameter binding (SQL injection prevention)
 6. Cache strategically
 7. Use params for configuration values
+8. Place shared code in `common/`, app-specific code in `frontend/`/`backend/`/`console/`
+9. Use `-local.php` configs for environment-specific settings (never commit secrets)
+10. Use `safeUp()`/`safeDown()` for transactional migrations

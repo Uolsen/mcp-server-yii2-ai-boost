@@ -10,8 +10,11 @@ use codechap\yii2boost\Mcp\Tools\Base\BaseTool;
 /**
  * DevServerTool - Start, stop, and make requests to the Yii2 built-in dev server.
  *
- * Allows AI agents to spin up `php yii serve`, hit routes, and capture
- * the HTTP response together with any PHP errors/warnings from stderr.
+ * Spawns `php -S` directly (bypassing `yii serve` + `passthru()`) so we get the
+ * real PID and can reliably stop the server.
+ *
+ * Uses PID files in the system temp directory so servers can be discovered and
+ * stopped even after the MCP process that started them has exited.
  *
  * Supports running multiple servers simultaneously for advanced template apps
  * (frontend, backend, api) on different ports.
@@ -27,6 +30,7 @@ class DevServerTool extends BaseTool
     private const MAX_RESPONSE_LENGTH = 102400; // 100 KB
     private const SERVER_STARTUP_WAIT = 1; // seconds to wait for server to start
     private const DEFAULT_APP_KEY = '_default';
+    private const PID_FILE_PREFIX = 'yii2_boost_devserver_';
 
     /** @var array<string, int> Default port assignments per app */
     private const APP_PORT_DEFAULTS = [
@@ -38,6 +42,7 @@ class DevServerTool extends BaseTool
 
     /**
      * Registry of running server instances, keyed by app key.
+     * Holds process resources for servers started by THIS process.
      *
      * @var array<string, array<string, mixed>>
      */
@@ -110,8 +115,174 @@ class DevServerTool extends BaseTool
         };
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    //  PID file helpers — persist server info across MCP process restarts
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * Get the PID file path for an app key.
+     */
+    private function getPidFilePath(string $appKey): string
+    {
+        // Include a hash of the project root to avoid collisions between projects
+        $projectHash = substr(md5($this->projectRoot ?? $this->basePath), 0, 8);
+        $safeKey = preg_replace('/[^a-zA-Z0-9_]/', '_', $appKey);
+        return sys_get_temp_dir() . '/' . self::PID_FILE_PREFIX . $projectHash . '_' . $safeKey . '.json';
+    }
+
+    /**
+     * Write server info to a PID file.
+     *
+     * @param string $appKey App key
+     * @param int $pid Process ID of the `php -S` server
+     * @param string $address Bound address (host:port)
+     * @param string $stderrFile Path to stderr temp file
+     */
+    private function writePidFile(string $appKey, int $pid, string $address, string $stderrFile): void
+    {
+        $data = [
+            'pid' => $pid,
+            'address' => $address,
+            'stderrFile' => $stderrFile,
+            'appKey' => $appKey,
+            'startedAt' => time(),
+        ];
+        @file_put_contents($this->getPidFilePath($appKey), json_encode($data, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * Read server info from a PID file.
+     *
+     * @return array<string, mixed>|null Server info or null if missing/invalid
+     */
+    private function readPidFile(string $appKey): ?array
+    {
+        $path = $this->getPidFilePath($appKey);
+        if (!file_exists($path)) {
+            return null;
+        }
+        $content = @file_get_contents($path);
+        if ($content === false) {
+            return null;
+        }
+        $data = json_decode($content, true);
+        if (!is_array($data) || empty($data['pid'])) {
+            @unlink($path);
+            return null;
+        }
+        return $data;
+    }
+
+    /**
+     * Remove the PID file for an app key.
+     */
+    private function removePidFile(string $appKey): void
+    {
+        $path = $this->getPidFilePath($appKey);
+        if (file_exists($path)) {
+            @unlink($path);
+        }
+    }
+
+    /**
+     * Discover all PID files for this project.
+     *
+     * @return array<string, array<string, mixed>> Map of appKey => pid file data
+     */
+    private function discoverPidFiles(): array
+    {
+        $projectHash = substr(md5($this->projectRoot ?? $this->basePath), 0, 8);
+        $prefix = self::PID_FILE_PREFIX . $projectHash . '_';
+        $tmpDir = sys_get_temp_dir();
+
+        $results = [];
+        $files = @glob($tmpDir . '/' . $prefix . '*.json');
+        if (!$files) {
+            return $results;
+        }
+
+        foreach ($files as $file) {
+            $content = @file_get_contents($file);
+            if ($content === false) {
+                continue;
+            }
+            $data = json_decode($content, true);
+            if (!is_array($data) || empty($data['pid']) || empty($data['appKey'])) {
+                @unlink($file);
+                continue;
+            }
+            $results[$data['appKey']] = $data;
+        }
+
+        return $results;
+    }
+
+    /**
+     * Check if a process with the given PID is alive.
+     */
+    private function isProcessAlive(int $pid): bool
+    {
+        if ($pid <= 0) {
+            return false;
+        }
+
+        if (PHP_OS_FAMILY === 'Windows') {
+            exec("tasklist /FI \"PID eq $pid\" 2>&1", $output);
+            return count($output) > 1;
+        }
+
+        // POSIX: signal 0 checks if the process exists
+        if (function_exists('posix_kill')) {
+            return posix_kill($pid, 0);
+        }
+
+        exec("kill -0 $pid 2>/dev/null", $output, $exitCode);
+        return $exitCode === 0;
+    }
+
+    /**
+     * Kill a process by PID (sends TERM, waits, then KILL).
+     */
+    private function killProcess(int $pid): void
+    {
+        if ($pid <= 0 || !$this->isProcessAlive($pid)) {
+            return;
+        }
+
+        if (PHP_OS_FAMILY === 'Windows') {
+            exec("taskkill /F /T /PID $pid 2>&1");
+            return;
+        }
+
+        // Send SIGTERM first for graceful shutdown
+        if (function_exists('posix_kill')) {
+            posix_kill($pid, SIGTERM);
+        } else {
+            exec("kill -TERM $pid 2>/dev/null");
+        }
+
+        // Wait briefly for graceful shutdown
+        usleep(200000); // 200ms
+
+        // php -S doesn't handle SIGTERM well — always follow up with SIGKILL
+        if ($this->isProcessAlive($pid)) {
+            if (function_exists('posix_kill')) {
+                posix_kill($pid, SIGKILL);
+            } else {
+                exec("kill -KILL $pid 2>/dev/null");
+            }
+            usleep(100000); // 100ms for kernel to reap
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  Action handlers
+    // ──────────────────────────────────────────────────────────────────────
+
     /**
      * Start the dev server as a background process.
+     *
+     * Spawns `php -S` directly (not through `yii serve`) so we own the real PID.
      */
     private function handleStart(array $arguments): array
     {
@@ -124,16 +295,15 @@ class DevServerTool extends BaseTool
         $appKey = $resolved['appKey'];
         /** @var string|null $docroot */
         $docroot = $resolved['docroot'];
-        /** @var string $cwd */
-        $cwd = $resolved['cwd'];
 
+        // Check in-memory first, then PID file
         if ($this->isRunning($appKey)) {
-            $server = self::$servers[$appKey];
+            $info = $this->getServerInfo($appKey);
             return [
                 'success' => true,
                 'message' => 'Server is already running',
                 'app' => $appKey,
-                'address' => $server['boundAddress'],
+                'address' => $info['address'] ?? 'unknown',
             ];
         }
 
@@ -157,17 +327,26 @@ class DevServerTool extends BaseTool
             return ['error' => "Port $port is already in use on $host."];
         }
 
+        // Resolve docroot — for basic apps, default to @app/web
+        if ($docroot === null) {
+            $docroot = $this->basePath . '/web';
+        }
+
+        if (!is_dir($docroot)) {
+            return ['error' => "Document root \"$docroot\" does not exist."];
+        }
+
         // Create a temp file for stderr
         $stderrFile = tempnam(sys_get_temp_dir(), 'yii_serve_stderr_');
 
+        // Spawn `php -S` directly — using `exec` so the shell replaces itself
+        // and proc_get_status() returns the real PHP PID.
         $cmd = sprintf(
-            'php yii serve %s',
-            escapeshellarg("$host:$port")
+            'exec %s -S %s -t %s',
+            escapeshellarg(PHP_BINARY),
+            escapeshellarg("$host:$port"),
+            escapeshellarg($docroot)
         );
-
-        if ($docroot !== null) {
-            $cmd .= sprintf(' --docroot=%s', escapeshellarg($docroot));
-        }
 
         $descriptors = [
             0 => ['pipe', 'r'],            // stdin
@@ -179,7 +358,7 @@ class DevServerTool extends BaseTool
             $cmd,
             $descriptors,
             $pipes,
-            $cwd,
+            $this->projectRoot ?? $this->basePath,
             null
         );
 
@@ -190,22 +369,21 @@ class DevServerTool extends BaseTool
         // Make stdout non-blocking so we can check without hanging
         stream_set_blocking($pipes[1], false);
 
-        self::$servers[$appKey] = [
-            'process' => $process,
-            'pipes' => $pipes,
-            'boundAddress' => "$host:$port",
-            'stderrFile' => $stderrFile,
-        ];
-
         // Wait briefly for the server to start
         sleep(self::SERVER_STARTUP_WAIT);
 
-        // Verify the process is still running
+        // Verify the process is still running and get its PID
         $status = proc_get_status($process);
         if (!$status['running']) {
             $stderr = (string) file_get_contents($stderrFile);
             $stdout = stream_get_contents($pipes[1]);
-            $this->cleanup($appKey);
+            foreach ($pipes as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
+            proc_close($process);
+            @unlink($stderrFile);
             return [
                 'error' => 'Server process exited immediately.',
                 'app' => $appKey,
@@ -214,12 +392,28 @@ class DevServerTool extends BaseTool
             ];
         }
 
+        $pid = $status['pid'];
+        $address = "$host:$port";
+
+        // Store in memory
+        self::$servers[$appKey] = [
+            'process' => $process,
+            'pipes' => $pipes,
+            'pid' => $pid,
+            'boundAddress' => $address,
+            'stderrFile' => $stderrFile,
+        ];
+
+        // Persist to PID file so other MCP sessions can find this server
+        $this->writePidFile($appKey, $pid, $address, $stderrFile);
+
         return [
             'success' => true,
             'message' => 'Dev server started',
             'app' => $appKey,
-            'address' => "$host:$port",
-            'url' => "http://$host:$port",
+            'address' => $address,
+            'url' => "http://$address",
+            'pid' => $pid,
         ];
     }
 
@@ -232,19 +426,13 @@ class DevServerTool extends BaseTool
 
         // Stop all servers
         if ($app === 'all') {
-            if (empty(self::$servers)) {
+            $stopped = $this->stopAllServers();
+
+            if (empty($stopped)) {
                 return [
                     'success' => true,
                     'message' => 'No servers are running (nothing to stop)',
                 ];
-            }
-
-            $stopped = [];
-            foreach (array_keys(self::$servers) as $key) {
-                if ($this->isRunning($key)) {
-                    $stopped[$key] = self::$servers[$key]['boundAddress'];
-                }
-                $this->cleanup($key);
             }
 
             return [
@@ -270,7 +458,9 @@ class DevServerTool extends BaseTool
             ];
         }
 
-        $address = self::$servers[$appKey]['boundAddress'];
+        $info = $this->getServerInfo($appKey);
+        $address = $info['address'] ?? 'unknown';
+
         $this->cleanup($appKey);
 
         return [
@@ -292,16 +482,16 @@ class DevServerTool extends BaseTool
         if ($app === null) {
             $result = ['servers' => []];
 
-            foreach (array_keys(self::$servers) as $key) {
-                $running = $this->isRunning($key);
-                if ($running) {
-                    $server = self::$servers[$key];
-                    $result['servers'][$key] = [
-                        'running' => true,
-                        'address' => $server['boundAddress'],
-                        'url' => 'http://' . $server['boundAddress'],
-                    ];
-                }
+            // Merge in-memory servers and PID file servers
+            $allServers = $this->discoverAllServers();
+
+            foreach ($allServers as $key => $info) {
+                $result['servers'][$key] = [
+                    'running' => true,
+                    'address' => $info['address'],
+                    'url' => 'http://' . $info['address'],
+                    'pid' => $info['pid'],
+                ];
             }
 
             if (empty($result['servers'])) {
@@ -324,16 +514,19 @@ class DevServerTool extends BaseTool
         $appKey = $resolved['appKey'];
         $running = $this->isRunning($appKey);
 
+        $info = $running ? $this->getServerInfo($appKey) : null;
+
         $result = [
             'app' => $appKey,
             'running' => $running,
-            'address' => $running ? self::$servers[$appKey]['boundAddress'] : null,
-            'url' => $running ? 'http://' . self::$servers[$appKey]['boundAddress'] : null,
+            'address' => $info['address'] ?? null,
+            'url' => $info ? 'http://' . $info['address'] : null,
+            'pid' => $info['pid'] ?? null,
         ];
 
         // Include recent stderr output if available
         if ($running) {
-            $stderrFile = self::$servers[$appKey]['stderrFile'];
+            $stderrFile = $info['stderrFile'] ?? null;
             if ($stderrFile && file_exists($stderrFile)) {
                 $stderr = file_get_contents($stderrFile);
                 if ($stderr !== false && $stderr !== '') {
@@ -384,8 +577,8 @@ class DevServerTool extends BaseTool
             }
         }
 
-        $server = self::$servers[$appKey];
-        $stderrFile = $server['stderrFile'];
+        $info = $this->getServerInfo($appKey);
+        $stderrFile = $info['stderrFile'] ?? null;
 
         // Note the stderr file position before the request
         $stderrBefore = 0;
@@ -393,7 +586,7 @@ class DevServerTool extends BaseTool
             $stderrBefore = filesize($stderrFile) ?: 0;
         }
 
-        $url = "http://" . $server['boundAddress'] . $route;
+        $url = "http://" . $info['address'] . $route;
 
         // Make the HTTP request using cURL
         $result = $this->doHttpRequest($url, $method, $timeout);
@@ -422,6 +615,10 @@ class DevServerTool extends BaseTool
         return $result;
     }
 
+    // ──────────────────────────────────────────────────────────────────────
+    //  Server state management
+    // ──────────────────────────────────────────────────────────────────────
+
     /**
      * Resolve the app key, docroot path, and working directory from arguments.
      *
@@ -434,8 +631,7 @@ class DevServerTool extends BaseTool
 
         // No app parameter: use default (backwards-compatible)
         if ($app === null) {
-            // For advanced apps, use project root as CWD (yii script lives there)
-            // and default to the first servable app's web/ directory
+            // For advanced apps, default to the first servable app's web/ directory
             if ($this->isAdvancedApp && $this->projectRoot) {
                 $servableApps = $this->getServableApps();
                 $docroot = !empty($servableApps) ? reset($servableApps) : null;
@@ -508,6 +704,198 @@ class DevServerTool extends BaseTool
 
         return $servable;
     }
+
+    /**
+     * Check whether a server is still running (in-memory or via PID file).
+     */
+    private function isRunning(string $appKey = self::DEFAULT_APP_KEY): bool
+    {
+        // 1. Check in-memory process first
+        if (isset(self::$servers[$appKey])) {
+            $process = self::$servers[$appKey]['process'];
+            if (is_resource($process)) {
+                $status = proc_get_status($process);
+                if ($status['running']) {
+                    return true;
+                }
+            }
+            // Process died — clean up in-memory entry (but not PID file yet)
+            $this->cleanupInMemory($appKey);
+        }
+
+        // 2. Check PID file (server may have been started by a previous MCP session)
+        $pidData = $this->readPidFile($appKey);
+        if ($pidData !== null && $this->isProcessAlive((int) $pidData['pid'])) {
+            return true;
+        }
+
+        // PID file exists but process is dead — clean up stale PID file
+        if ($pidData !== null) {
+            $this->removePidFile($appKey);
+            // Clean up stale stderr file too
+            if (!empty($pidData['stderrFile']) && file_exists($pidData['stderrFile'])) {
+                @unlink($pidData['stderrFile']);
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Get server info from either in-memory or PID file.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function getServerInfo(string $appKey): ?array
+    {
+        // In-memory first
+        if (isset(self::$servers[$appKey])) {
+            return [
+                'pid' => self::$servers[$appKey]['pid'] ?? null,
+                'address' => self::$servers[$appKey]['boundAddress'],
+                'stderrFile' => self::$servers[$appKey]['stderrFile'],
+            ];
+        }
+
+        // Fall back to PID file
+        return $this->readPidFile($appKey);
+    }
+
+    /**
+     * Discover all running servers (in-memory + PID files).
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function discoverAllServers(): array
+    {
+        $result = [];
+
+        // In-memory servers
+        foreach (array_keys(self::$servers) as $key) {
+            if ($this->isRunning($key)) {
+                $info = $this->getServerInfo($key);
+                if ($info) {
+                    $result[$key] = $info;
+                }
+            }
+        }
+
+        // PID file servers (from previous MCP sessions)
+        foreach ($this->discoverPidFiles() as $key => $data) {
+            if (isset($result[$key])) {
+                continue; // Already found in-memory
+            }
+            if ($this->isProcessAlive((int) $data['pid'])) {
+                $result[$key] = $data;
+            } else {
+                // Stale PID file
+                $this->removePidFile($key);
+                if (!empty($data['stderrFile']) && file_exists($data['stderrFile'])) {
+                    @unlink($data['stderrFile']);
+                }
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Stop all known servers (in-memory + PID files).
+     *
+     * @return array<string, string> Map of appKey => address for servers that were stopped
+     */
+    private function stopAllServers(): array
+    {
+        $stopped = [];
+        $allServers = $this->discoverAllServers();
+
+        foreach ($allServers as $key => $info) {
+            $stopped[$key] = $info['address'];
+            $this->cleanup($key);
+        }
+
+        return $stopped;
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  Cleanup
+    // ──────────────────────────────────────────────────────────────────────
+
+    /**
+     * Clean up only the in-memory entry (pipes, process resource).
+     */
+    private function cleanupInMemory(string $appKey): void
+    {
+        if (!isset(self::$servers[$appKey])) {
+            return;
+        }
+
+        $server = self::$servers[$appKey];
+
+        // Close pipes
+        if (isset($server['pipes']) && is_array($server['pipes'])) {
+            foreach ($server['pipes'] as $pipe) {
+                if (is_resource($pipe)) {
+                    fclose($pipe);
+                }
+            }
+        }
+
+        // Close process resource
+        if (isset($server['process']) && is_resource($server['process'])) {
+            proc_close($server['process']);
+        }
+
+        unset(self::$servers[$appKey]);
+    }
+
+    /**
+     * Full cleanup: kill the server process, remove PID file, clean up resources.
+     */
+    private function cleanup(string $appKey = self::DEFAULT_APP_KEY): void
+    {
+        $pid = null;
+        $stderrFile = null;
+
+        // Get PID from in-memory or PID file
+        if (isset(self::$servers[$appKey])) {
+            $pid = self::$servers[$appKey]['pid'] ?? null;
+            $stderrFile = self::$servers[$appKey]['stderrFile'] ?? null;
+
+            // If we don't have pid in memory, try proc_get_status
+            if ($pid === null && is_resource(self::$servers[$appKey]['process'])) {
+                $status = proc_get_status(self::$servers[$appKey]['process']);
+                $pid = $status['pid'];
+            }
+        }
+
+        // Also check PID file (may have been started by another session)
+        $pidData = $this->readPidFile($appKey);
+        if ($pidData !== null) {
+            $pid = $pid ?? (int) $pidData['pid'];
+            $stderrFile = $stderrFile ?? ($pidData['stderrFile'] ?? null);
+        }
+
+        // Kill the process
+        if ($pid !== null && $pid > 0) {
+            $this->killProcess($pid);
+        }
+
+        // Clean up in-memory resources
+        $this->cleanupInMemory($appKey);
+
+        // Remove PID file
+        $this->removePidFile($appKey);
+
+        // Clean up stderr temp file
+        if ($stderrFile !== null && file_exists($stderrFile)) {
+            @unlink($stderrFile);
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  HTTP client
+    // ──────────────────────────────────────────────────────────────────────
 
     /**
      * Perform an HTTP request using cURL.
@@ -635,99 +1023,6 @@ class DevServerTool extends BaseTool
             'body_length' => strlen($body),
             'truncated' => $truncated,
         ];
-    }
-
-    /**
-     * Check whether a server process is still running.
-     */
-    private function isRunning(string $appKey = self::DEFAULT_APP_KEY): bool
-    {
-        if (!isset(self::$servers[$appKey])) {
-            return false;
-        }
-
-        $process = self::$servers[$appKey]['process'];
-        if (!is_resource($process)) {
-            $this->cleanup($appKey);
-            return false;
-        }
-
-        $status = proc_get_status($process);
-        if (!$status['running']) {
-            $this->cleanup($appKey);
-            return false;
-        }
-
-        return true;
-    }
-
-    /**
-     * Kill a server process and clean up resources.
-     */
-    private function cleanup(string $appKey = self::DEFAULT_APP_KEY): void
-    {
-        if (!isset(self::$servers[$appKey])) {
-            return;
-        }
-
-        $server = self::$servers[$appKey];
-        $process = $server['process'];
-        $pipes = $server['pipes'];
-        $stderrFile = $server['stderrFile'];
-
-        if (is_resource($process)) {
-            $status = proc_get_status($process);
-            $pid = $status['pid'];
-
-            // Close pipes first to unblock proc_close
-            if (is_array($pipes)) {
-                foreach ($pipes as $pipe) {
-                    if (is_resource($pipe)) {
-                        fclose($pipe);
-                    }
-                }
-            }
-
-            // Kill the process tree
-            if ($pid > 0 && $status['running']) {
-                if (PHP_OS_FAMILY === 'Windows') {
-                    exec("taskkill /F /T /PID $pid 2>&1");
-                } else {
-                    exec("pkill -TERM -P $pid 2>/dev/null");
-                    usleep(100000); // 100ms grace
-                    exec("pkill -KILL -P $pid 2>/dev/null");
-                    if (function_exists('posix_kill')) {
-                        posix_kill($pid, SIGTERM);
-                    } else {
-                        exec("kill -TERM $pid 2>/dev/null");
-                    }
-                    usleep(100000);
-                    if (function_exists('posix_kill')) {
-                        posix_kill($pid, SIGKILL);
-                    } else {
-                        exec("kill -KILL $pid 2>/dev/null");
-                    }
-                }
-            }
-
-            proc_close($process);
-        } else {
-            // No valid process, just clean up pipes
-            if (is_array($pipes)) {
-                foreach ($pipes as $pipe) {
-                    if (is_resource($pipe)) {
-                        fclose($pipe);
-                    }
-                }
-            }
-        }
-
-        // Clean up stderr temp file
-        if ($stderrFile !== null && file_exists($stderrFile)) {
-            @unlink($stderrFile);
-        }
-
-        unset(self::$servers[$appKey]);
     }
 
     /**

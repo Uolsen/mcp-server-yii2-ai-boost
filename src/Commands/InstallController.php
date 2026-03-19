@@ -147,6 +147,9 @@ class InstallController extends Controller
     /**
      * Generate MCP configuration files
      *
+     * Detects Docker Compose environments and asks the user whether to run
+     * the MCP server inside Docker or via local PHP.
+     *
      * @param array $envInfo Environment information
      * @throws \Exception
      */
@@ -154,18 +157,56 @@ class InstallController extends Controller
     {
         $basePath = ProjectRootResolver::resolve();
 
-        $phpPath = PHP_BINARY;
-        $yiiPath = ProjectRootResolver::getYiiScriptPath($basePath) ?? $basePath . '/yii';
+        $composePath = $this->detectDockerCompose($basePath);
 
-        $mcpConfig = [
-            'mcpServers' => [
-                'yii2-boost' => [
-                    'command' => $phpPath,
-                    'args' => [$yiiPath, 'boost/mcp'],
-                    'env' => (object)[],
+        $useDocker = false;
+        $dockerService = null;
+        $containerYiiPath = null;
+
+        if ($composePath !== null) {
+            $composeFile = basename($composePath);
+            $this->stdout("  Docker Compose detected: {$composeFile}\n", 36);
+
+            if ($this->confirm('  Run MCP server inside Docker?', true)) {
+                $useDocker = true;
+                $parsed = $this->parseComposePhpService($composePath);
+
+                $dockerService = $this->prompt('  Docker service name', [
+                    'required' => true,
+                    'default' => $parsed['service'],
+                ]);
+
+                $containerYiiPath = $this->prompt('  Path to yii script inside container', [
+                    'required' => true,
+                    'default' => rtrim($parsed['app_path'], '/') . '/yii',
+                ]);
+            }
+        }
+
+        if ($useDocker) {
+            $mcpConfig = [
+                'mcpServers' => [
+                    'yii2-boost' => [
+                        'command' => 'docker',
+                        'args' => ['compose', 'exec', '-T', $dockerService, 'php', $containerYiiPath, 'boost/mcp'],
+                        'env' => (object)[],
+                    ],
                 ],
-            ],
-        ];
+            ];
+        } else {
+            $phpPath = PHP_BINARY;
+            $yiiPath = ProjectRootResolver::getYiiScriptPath($basePath) ?? $basePath . '/yii';
+
+            $mcpConfig = [
+                'mcpServers' => [
+                    'yii2-boost' => [
+                        'command' => $phpPath,
+                        'args' => [$yiiPath, 'boost/mcp'],
+                        'env' => (object)[],
+                    ],
+                ],
+            ];
+        }
 
         $mcpConfigJson = json_encode($mcpConfig, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
         $this->updateFileWithConfirmation(
@@ -175,6 +216,67 @@ class InstallController extends Controller
         );
 
         $this->addToGitignore($basePath, '.mcp.json');
+    }
+
+    /**
+     * Detect Docker Compose file in the project root.
+     *
+     * @param string $projectRoot Project root path
+     * @return string|null Path to compose file, or null if not found
+     */
+    private function detectDockerCompose(string $projectRoot): ?string
+    {
+        $candidates = [
+            'docker-compose.yml',
+            'docker-compose.yaml',
+            'compose.yaml',
+            'compose.yml',
+        ];
+
+        foreach ($candidates as $filename) {
+            $path = $projectRoot . '/' . $filename;
+            if (file_exists($path)) {
+                return $path;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Parse a Docker Compose file to detect the PHP service name and app mount path.
+     *
+     * Uses simple regex matching — no YAML parser dependency required.
+     *
+     * @param string $composePath Path to the compose file
+     * @return array{service: string, app_path: string}
+     */
+    private function parseComposePhpService(string $composePath): array
+    {
+        $content = file_get_contents($composePath);
+        $result = [
+            'service' => 'php',
+            'app_path' => '/var/www/html',
+        ];
+
+        if ($content === false) {
+            return $result;
+        }
+
+        // Find a service named exactly 'php'
+        if (preg_match('/^[ ]{2,4}php:\s*$/m', $content)) {
+            $result['service'] = 'php';
+        } elseif (preg_match('/^[ ]{2,4}(\w*php\w*):\s*$/mi', $content, $matches)) {
+            // Fall back to first service containing 'php' in the name
+            $result['service'] = $matches[1];
+        }
+
+        // Parse volumes to find the app mount point (e.g. ".:/var/www/html")
+        if (preg_match_all('/^\s+-\s+\.(?:\/)?:([^:\s#]+)/m', $content, $matches)) {
+            $result['app_path'] = rtrim($matches[1][0], '/');
+        }
+
+        return $result;
     }
 
     /**
